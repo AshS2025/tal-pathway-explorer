@@ -1,0 +1,8 @@
+Next Steps 
+- write actual code for the proposed analysis criteria -- think more about scoring weights and combining them with DORAnet score
+- find the enzymatic reactions library
+- think about whether additional thermo analysis is required or is the doranet stuff enough - use equilibrator or whatever 
+- write code that creates whitelist of reactions (required feature to prevent combinatorial explosion bc it'll cut reactions) because right now everything is hardcoded (not good
+for a scalable tool)
+- ask gaurav what criteria lemnisca cares most about
+- market research for end product economic viability scoring? is this something the network should even do? 
