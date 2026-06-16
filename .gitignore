@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+# Generated network / pathway artifacts from test runs
+*.pgnet
+*_saved_network*
+*_network_pretreated.json
+*_pathways.txt
+*_reaxys_batch_query.txt
+*_reaxys_batch_result.csv
