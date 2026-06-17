@@ -111,9 +111,11 @@ class Minimum_Carbon_Count_Filter(metadata.ReactionFilterBase):
                     f"Filter only works with MolDatRDKit, not {type(mol.item)}"
                 )
             rdmol = mol.item.rdkitmol
-            carbon_count = (
-                rdMolDescriptors.CalcNumAliphaticCarbons(rdmol)
-                + rdMolDescriptors.CalcNumAromaticCarbons(rdmol)
+            # Count all carbons via atomic number — rdMolDescriptors
+            # has no CalcNumAliphaticCarbons; iterating atoms is
+            # equivalent and avoids the missing-symbol crash.
+            carbon_count = sum(
+                1 for a in rdmol.GetAtoms() if a.GetAtomicNum() == 6
             )
             if carbon_count < self.min_carbons:
                 return False
