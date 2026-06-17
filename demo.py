@@ -268,8 +268,8 @@ def scene_3_directed_search(exploration_result):
     scored = scorer.score(pathways)
     scored.sort(key=lambda sp: sp.final_score, reverse=True)
 
-    print(f"\nTop {min(3, len(scored))} ranked routes:")
-    for i, sp in enumerate(scored[:3], 1):
+    print(f"\nAll {len(scored)} ranked routes:")
+    for i, sp in enumerate(scored, 1):
         print()
         print(f"  Route {i}  —  final score {sp.final_score:.3f}  "
               f"({sp.pathway.num_steps} steps)")
@@ -330,8 +330,8 @@ def _append_directed_search_to_report(scored):
     lines.append("")
     lines.append(f"`{DIRECTED_TARGET}`")
     lines.append("")
-    lines.append(f"## Top {min(3, len(scored))} ranked routes")
-    for i, sp in enumerate(scored[:3], 1):
+    lines.append(f"## All {len(scored)} ranked routes")
+    for i, sp in enumerate(scored, 1):
         lines.append("")
         lines.append(
             f"### Route {i} — final score {sp.final_score:.3f} "
