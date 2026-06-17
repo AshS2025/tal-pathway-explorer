@@ -75,19 +75,21 @@ STARTER_FILE = "demo_starter.smi"
 HELPER_FILE = "demo_helpers.smi"
 
 TAL_SMILES = "Cc1cc(O)cc(=O)o1"
-HELPERS = ["O", "[H][H]"]
+# H2, water, ethanol. Ethanol unlocks alkylation chemistry,
+# enabling multiple routes to ethyl-substituted derivatives —
+# without it, the directed-search PDF would only have one page.
+HELPERS = ["[H][H]", "O", "CCO"]
 
-GENERATIONS = 2
+GENERATIONS = 3
 TOP_N = 10
-MAX_NUM_RXNS = 3
+MAX_NUM_RXNS = 20
 
-# Precoded target for the directed-search scene. This is a TAL
-# self-Diels-Alder cycloadduct — a known polyketide cyclization
-# product. Reachable in 1 chem step from TAL, so it demos cleanly
-# at gen=2. To demo a different target (e.g. sorbic acid), set
-# DIRECTED_TARGET to its SMILES and bump GENERATIONS to 3+.
-DIRECTED_TARGET = "CC12C=C(O)C(C(=O)O1)C1C(O)=CC(=O)OC12C"
-DIRECTED_TARGET_LABEL = "TAL Diels-Alder cycloadduct (polyketide dimer)"
+# Precoded target: 3-ethyl-6-methyl-2H-pyran-2-one. A TAL
+# hydroalkylation derivative — multiple distinct routes exist
+# (direct alkylation, hydrogenation-first, ether-intermediate) so
+# we get a multi-page ranked PDF.
+DIRECTED_TARGET = "CCc1ccc(C)oc1=O"
+DIRECTED_TARGET_LABEL = "Ethyl-methyl-pyranone (TAL hydroalkylation derivative)"
 
 
 def banner(text, char="="):
@@ -173,7 +175,9 @@ def scene_2_exploration():
             direction="forward",
             molecule_thermo_calculator=None,
             max_rxn_thermo_change=15.0,
-            max_atoms={"C": 50, "O": 8, "N": 0, "S": 0},
+            # Tighter limits keep gen=3 tractable (matches the notebook
+            # config that produced 5 ranked routes in ~10s).
+            max_atoms={"C": 25, "O": 4, "N": 2, "S": 0},
             max_molecular_weight=500,
             allow_multiple_reactants="default",
             strategy="cartesian",
