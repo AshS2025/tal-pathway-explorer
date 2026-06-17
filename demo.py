@@ -53,6 +53,10 @@ from pathway_tools import (
     find_pathways_to_target,
     load_pathways_from_file,
 )
+from doranet.modules.post_processing.post_processing import (
+    pathway_ranking,
+    pathway_visualization,
+)
 from pathway_scoring import (
     StepsCriterion,
     ThermoCriterion,
@@ -280,6 +284,72 @@ def scene_3_directed_search(exploration_result):
             except Exception:
                 print(f"    {j}. {rxn}")
 
+    # Append the directed-search results to the exploration markdown
+    # report so both modes live in one artifact.
+    _append_directed_search_to_report(scored)
+
+    # Generate a PDF visualization of the ranked pathways via DORAnet.
+    # DORAnet's pipeline is: pathway_finder → pathway_ranking → visualization.
+    # We already ran pathway_finder above; now rank (DORAnet's built-in
+    # weights — separate from our 5-criteria scorer above), then visualize.
+    print()
+    print("Generating pathway visualization PDF...")
+    target_file = "demo_directed_target.smi"
+    write_smiles_file(target_file, [DIRECTED_TARGET])
+    try:
+        pathway_ranking(
+            starters=STARTER_FILE,
+            helpers=HELPER_FILE,
+            target=target_file,
+            job_name=directed_job,
+        )
+        pathway_visualization(
+            starters=STARTER_FILE,
+            helpers=HELPER_FILE,
+            job_name=directed_job,
+        )
+        pdf_path = f"{directed_job}_pathways_visualized.pdf"
+        if os.path.exists(pdf_path):
+            print(f"  PDF written: {pdf_path}")
+        else:
+            print("  PDF generation completed but file not found at "
+                  f"{pdf_path}")
+    except Exception as exc:
+        print(f"  (PDF generation skipped: {exc})")
+
+
+def _append_directed_search_to_report(scored):
+    """Append a directed-search section to the exploration report."""
+    report_path = f"{JOB_NAME}_exploration_report.md"
+    lines = ["", "---", "", "# Directed Search — precoded target", ""]
+    lines.append(f"**Target:** {DIRECTED_TARGET_LABEL}")
+    lines.append("")
+    lines.append(f"`{DIRECTED_TARGET}`")
+    lines.append("")
+    lines.append(f"## Top {min(3, len(scored))} ranked routes")
+    for i, sp in enumerate(scored[:3], 1):
+        lines.append("")
+        lines.append(
+            f"### Route {i} — final score {sp.final_score:.3f} "
+            f"({sp.pathway.num_steps} steps)"
+        )
+        lines.append("")
+        lines.append("**Criterion breakdown:**")
+        for name, val in sp.components.items():
+            lines.append(f"- `{name}`: {val:.3f}")
+        lines.append("")
+        lines.append("**Reaction steps:**")
+        for j, rxn in enumerate(sp.pathway.reactions, 1):
+            try:
+                reactants_part, op_name, _, products_part = rxn.split(">")
+                arrow = f"{reactants_part} → {products_part}"
+                lines.append(f"{j}. `{op_name}` — {arrow}")
+            except Exception:
+                lines.append(f"{j}. {rxn}")
+    lines.append("")
+    with open(report_path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
 
 # =====================================================================
 # Scene 4 — what's next
@@ -327,11 +397,14 @@ def cleanup_artifacts():
         f"{JOB_NAME}_directed_network_pretreated.json",
         f"{JOB_NAME}_directed_reaxys_batch_*.txt",
         f"{JOB_NAME}_directed_reaxys_batch_*.csv",
+        f"{JOB_NAME}_directed_ranked_pathways*.txt",
         f"{JOB_NAME}_*_saved_network*",
         f"{JOB_NAME}_network_pretreated.json",
         f"{JOB_NAME}_pathways.txt",
         f"{JOB_NAME}_reaxys_batch_*.txt",
         f"{JOB_NAME}_reaxys_batch_*.csv",
+        # Demo input files (regenerated each run)
+        "demo_directed_target.smi",
     ]
     n_removed = 0
     for pat in patterns:
@@ -355,10 +428,18 @@ def main():
     n_cleaned = cleanup_artifacts()
 
     banner(f"DEMO COMPLETE  ({time.time() - t_total:.1f}s total)", char="#")
-    print(f"\nFull markdown report: {JOB_NAME}_exploration_report.md")
-    print("Open in any markdown viewer (VS Code: Ctrl+Shift+V).")
+    print()
+    print("Output files:")
+    print(f"  Markdown report (exploration + directed search):")
+    print(f"    {JOB_NAME}_exploration_report.md")
+    print(f"      (in VS Code, open and press Ctrl+Shift+V for rendered view)")
+    pdf_path = f"{JOB_NAME}_directed_pathways_visualized.pdf"
+    if os.path.exists(pdf_path):
+        print(f"  PDF visualization of the ranked directed-search route:")
+        print(f"    {pdf_path}")
+        print(f"      (double-click to open in your default PDF viewer)")
     if n_cleaned:
-        print(f"\n[housekeeping] Cleaned up {n_cleaned} intermediate artifact files.\n")
+        print(f"\n[housekeeping] Cleaned up {n_cleaned} intermediate files.\n")
     else:
         print()
 
