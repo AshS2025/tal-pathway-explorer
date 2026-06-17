@@ -63,8 +63,13 @@ from pathway_scoring import (
     IntermediateStabilityCriterion,
     ProcedureDiversityCriterion,
     ChemBioSwitchCriterion,
+    AtomEconomyCriterion,
+    ByProductCountCriterion,
     WeightedPathwayScorer,
+    parse_doranet_ranked_file,
+    rewrite_ranked_file_with_unified_order,
 )
+from config import DEFAULT_WEIGHTS, build_unified_profile
 from tal_downstream_derivatives import TAL_DOWNSTREAM_DERIVATIVES
 from tal_reaction_whitelist import TAL_REACTION_WHITELIST
 from tal_bio_reaction_whitelist import TAL_BIO_REACTION_WHITELIST
@@ -137,15 +142,19 @@ def scene_1_architecture():
     except Exception as exc:
         print(f"  (could not load ruleset sample: {exc})")
 
-    print("\nPathway-ranking criteria (all pluggable, all weight-tunable):")
-    for cls in (
-        StepsCriterion,
-        ThermoCriterion,
-        IntermediateStabilityCriterion,
-        ProcedureDiversityCriterion,
-        ChemBioSwitchCriterion,
+    print("\nPathway-ranking criteria (all pluggable, all weight-tunable")
+    print("from src/config.py:DEFAULT_WEIGHTS):")
+    for name, cls in (
+        ("steps",        StepsCriterion),
+        ("thermo",       ThermoCriterion),
+        ("stability",    IntermediateStabilityCriterion),
+        ("diversity",    ProcedureDiversityCriterion),
+        ("chem_bio",     ChemBioSwitchCriterion),
+        ("atom_economy", AtomEconomyCriterion),
+        ("by_product",   ByProductCountCriterion),
     ):
-        print(f"  - {cls.__name__}")
+        weight = DEFAULT_WEIGHTS.get(name, "—")
+        print(f"  - {cls.__name__:32s}  weight={weight}")
 
 
 # =====================================================================
@@ -256,17 +265,38 @@ def scene_3_directed_search(exploration_result):
         print(f"  literature targets like sorbic acid.")
         return
 
-    print(f"\n{len(pathways)} pathway(s) found. Scoring with all 5 criteria...")
+    # ----------------------------------------------------------------
+    # Run DORAnet's pathway_ranking FIRST so we can pull its per-pathway
+    # atom_economy and by_product values into our unified scorer. The
+    # ranked file it writes will be rewritten in our order below so the
+    # PDF reflects the unified scoring.
+    # ----------------------------------------------------------------
+    target_file = "demo_directed_target.smi"
+    write_smiles_file(target_file, [DIRECTED_TARGET])
+    pathway_ranking(
+        starters=STARTER_FILE,
+        helpers=HELPER_FILE,
+        target=target_file,
+        job_name=directed_job,
+    )
+    atom_econ_by_idx, by_prod_by_idx = parse_doranet_ranked_file(
+        directed_job, pathways
+    )
 
-    scorer = WeightedPathwayScorer([
-        (StepsCriterion(),                  4.0),
-        (ThermoCriterion(),                 2.0),
-        (IntermediateStabilityCriterion(),  2.0),
-        (ProcedureDiversityCriterion(),     2.0),
-        (ChemBioSwitchCriterion(),          2.0),
-    ])
+    profile = build_unified_profile(
+        atom_economy_by_index=atom_econ_by_idx,
+        by_product_by_index=by_prod_by_idx,
+    )
+    scorer = WeightedPathwayScorer(profile)
+
+    print(f"\n{len(pathways)} pathway(s) found. Scoring with the unified "
+          f"{len(profile)}-criteria scorer...")
     scored = scorer.score(pathways)
     scored.sort(key=lambda sp: sp.final_score, reverse=True)
+
+    # Rewrite the ranked file in OUR order so the PDF visualization
+    # reflects the unified scoring, not DORAnet's defaults.
+    rewrite_ranked_file_with_unified_order(directed_job, scored)
 
     print(f"\nAll {len(scored)} ranked routes:")
     for i, sp in enumerate(scored, 1):
@@ -292,21 +322,11 @@ def scene_3_directed_search(exploration_result):
     # report so both modes live in one artifact.
     _append_directed_search_to_report(scored)
 
-    # Generate a PDF visualization of the ranked pathways via DORAnet.
-    # DORAnet's pipeline is: pathway_finder → pathway_ranking → visualization.
-    # We already ran pathway_finder above; now rank (DORAnet's built-in
-    # weights — separate from our 5-criteria scorer above), then visualize.
+    # Generate the PDF directly from the rewritten ranked file —
+    # pages will appear in OUR scorer's order.
     print()
     print("Generating pathway visualization PDF...")
-    target_file = "demo_directed_target.smi"
-    write_smiles_file(target_file, [DIRECTED_TARGET])
     try:
-        pathway_ranking(
-            starters=STARTER_FILE,
-            helpers=HELPER_FILE,
-            target=target_file,
-            job_name=directed_job,
-        )
         pathway_visualization(
             starters=STARTER_FILE,
             helpers=HELPER_FILE,

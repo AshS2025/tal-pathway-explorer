@@ -594,3 +594,228 @@ def score_pathways_from_file(
     scored = scorer.score(pathways)
     scored.sort(key=lambda sp: sp.final_score, reverse=True)
     return scored
+
+
+# =====================================================================
+# DORAnet-derived criteria
+# =====================================================================
+# These wrap raw per-pathway values DORAnet's `pathway_ranking` writes
+# to `{job_name}_ranked_pathways.txt` (atom economy as a float, by-
+# product count as an int) and normalize them the same way the rest of
+# the criteria do — min-max within the batch, higher = better. This
+# lets DORAnet's metrics live in the same WeightedPathwayScorer as the
+# custom criteria, with one shared weight table.
+
+
+class AtomEconomyCriterion(PathwayCriterion):
+    """
+    Higher atom economy = higher score. Values come from DORAnet's
+    pathway_ranking output (atom_economy_by_index dict, keyed by
+    Pathway.index).
+    """
+
+    name = "atom_economy"
+
+    def __init__(self, atom_economy_by_index: dict[int, float]):
+        self._values = atom_economy_by_index
+
+    def score(self, pathways: list[Pathway]) -> list[float]:
+        if not pathways:
+            return []
+        raw = [self._values.get(p.index) for p in pathways]
+        # Pathways with no recorded value get 0 — DORAnet skipped them.
+        clean = [v if v is not None else 0.0 for v in raw]
+        lo, hi = min(clean), max(clean)
+        if hi == lo:
+            return [1.0] * len(clean)
+        return [(v - lo) / (hi - lo) for v in clean]
+
+
+class ByProductCountCriterion(PathwayCriterion):
+    """
+    Fewer by-product atoms across the pathway = higher score. Counts
+    come from DORAnet's pathway_ranking ('pathway by-product N' in the
+    ranked file).
+    """
+
+    name = "by_product"
+
+    def __init__(self, by_product_by_index: dict[int, int]):
+        self._values = by_product_by_index
+
+    def score(self, pathways: list[Pathway]) -> list[float]:
+        if not pathways:
+            return []
+        raw = [self._values.get(p.index) for p in pathways]
+        # Missing → treat as worst (max).
+        max_seen = max((v for v in raw if v is not None), default=0)
+        clean = [v if v is not None else max_seen for v in raw]
+        lo, hi = min(clean), max(clean)
+        if hi == lo:
+            return [1.0] * len(clean)
+        # Fewer = better, so invert.
+        return [(hi - v) / (hi - lo) for v in clean]
+
+
+def _split_ranked_blocks(content: str) -> list[list[str]]:
+    """
+    Walk the file line by line and group lines into pathway blocks.
+    A new block starts whenever we hit a 'ranking N' line. Each block
+    is the list of its non-blank lines. Works regardless of how many
+    blank lines separate blocks — robust to format drift.
+    """
+    blocks: list[list[str]] = []
+    current: list[str] | None = None
+    for raw in content.splitlines():
+        line = raw.rstrip()
+        if not line.strip():
+            continue
+        if line.startswith("ranking "):
+            if current is not None:
+                blocks.append(current)
+            current = [line]
+        else:
+            if current is None:
+                continue
+            current.append(line)
+    if current is not None:
+        blocks.append(current)
+    return blocks
+
+
+def parse_doranet_ranked_file(
+    job_name: str, pathways: list[Pathway]
+) -> tuple[dict[int, float], dict[int, int]]:
+    """
+    Parse `{job_name}_ranked_pathways.txt` and return two dicts keyed
+    by Pathway.index:
+        atom_economy_by_index : {Pathway.index → atom economy float}
+        by_product_by_index   : {Pathway.index → by-product atom count}
+
+    Matching: DORAnet writes pathways in its own ranked order, not in
+    Pathway.index order. We match by the multiset of reaction SMILES
+    each pathway uses (unique within a directed-search batch).
+    """
+    import os
+
+    file_path = f"{job_name}_ranked_pathways.txt"
+    if not os.path.exists(file_path):
+        return {}, {}
+
+    with open(file_path, encoding="utf-8") as f:
+        content = f.read()
+
+    atom_by_key: dict[frozenset, float] = {}
+    by_prod_by_key: dict[frozenset, int] = {}
+
+    for block in _split_ranked_blocks(content):
+        atom_econ: float | None = None
+        by_prod: int | None = None
+        rxn_smiles: list[str] = []
+        in_rxn = False
+        for line in block:
+            if line.startswith("atomic economy"):
+                try:
+                    atom_econ = float(line.split("atomic economy", 1)[1].strip())
+                except ValueError:
+                    pass
+            elif line.startswith("pathway by-product"):
+                try:
+                    by_prod = int(line.split("pathway by-product", 1)[1].strip())
+                except ValueError:
+                    pass
+            elif line.startswith("reaction SMILES"):
+                in_rxn = True
+            elif in_rxn and ">>" in line:
+                rxn_smiles.append(line.strip())
+        if rxn_smiles:
+            key = frozenset(rxn_smiles)
+            if atom_econ is not None:
+                atom_by_key[key] = atom_econ
+            if by_prod is not None:
+                by_prod_by_key[key] = by_prod
+
+    atom_by_idx: dict[int, float] = {}
+    by_prod_by_idx: dict[int, int] = {}
+    for p in pathways:
+        keys = set()
+        for rxn_str in p.reactions:
+            parsed = parse_reaction_string(rxn_str)
+            keys.add(
+                f"{'.'.join(parsed['reactants'])}>>"
+                f"{'.'.join(parsed['products'])}"
+            )
+        fkey = frozenset(keys)
+        if fkey in atom_by_key:
+            atom_by_idx[p.index] = atom_by_key[fkey]
+        if fkey in by_prod_by_key:
+            by_prod_by_idx[p.index] = by_prod_by_key[fkey]
+
+    return atom_by_idx, by_prod_by_idx
+
+
+def rewrite_ranked_file_with_unified_order(
+    job_name: str,
+    scored: list[ScoredPathway],
+) -> None:
+    """
+    Rewrite `{job_name}_ranked_pathways.txt` so the pathway blocks are
+    in OUR scorer's order and the 'final score' line reflects our
+    unified weighted score. This is what makes the PDF visualization
+    reflect the unified scoring instead of DORAnet's defaults.
+
+    Preserves DORAnet's atom_economy / by_product / intermediate /
+    reaction SMILES lines so pathway_visualization still finds what
+    it expects.
+    """
+    import os
+
+    file_path = f"{job_name}_ranked_pathways.txt"
+    if not os.path.exists(file_path):
+        return
+
+    with open(file_path, encoding="utf-8") as f:
+        content = f.read()
+
+    # Map each block to its reaction-SMILES set so we can look up by
+    # the same key used in parse_doranet_ranked_file.
+    blocks_by_key: dict[frozenset, list[str]] = {}
+    for block in _split_ranked_blocks(content):
+        rxn_smiles = []
+        in_rxn = False
+        for line in block:
+            if line.startswith("reaction SMILES"):
+                in_rxn = True
+            elif in_rxn and ">>" in line:
+                rxn_smiles.append(line.strip())
+        if rxn_smiles:
+            blocks_by_key[frozenset(rxn_smiles)] = block
+
+    new_chunks: list[str] = []
+    for rank, sp in enumerate(scored, 1):
+        keys = set()
+        for rxn_str in sp.pathway.reactions:
+            parsed = parse_reaction_string(rxn_str)
+            keys.add(
+                f"{'.'.join(parsed['reactants'])}>>"
+                f"{'.'.join(parsed['products'])}"
+            )
+        fkey = frozenset(keys)
+        block_lines = blocks_by_key.get(fkey)
+        if block_lines is None:
+            continue
+        # Rebuild the block, replacing "ranking N" and "final score X"
+        # with our values but keeping everything else byte-identical.
+        new_lines: list[str] = []
+        for line in block_lines:
+            if line.startswith("ranking"):
+                new_lines.append(f"ranking {rank}")
+            elif line.startswith("final score"):
+                new_lines.append(f"final score {sp.final_score:.6f}")
+            else:
+                new_lines.append(line)
+        new_chunks.append("\n".join(new_lines))
+
+    # Blank line between blocks — same convention as DORAnet's writer.
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write("\n\n".join(new_chunks) + "\n")
