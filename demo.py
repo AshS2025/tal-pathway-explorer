@@ -48,7 +48,11 @@ warnings.filterwarnings("ignore")
 
 import pandas as pd
 
-from pathway_tools import explore_downstream
+from pathway_tools import (
+    explore_downstream,
+    find_pathways_to_target,
+    load_pathways_from_file,
+)
 from pathway_scoring import (
     StepsCriterion,
     ThermoCriterion,
@@ -56,7 +60,6 @@ from pathway_scoring import (
     ProcedureDiversityCriterion,
     ChemBioSwitchCriterion,
     WeightedPathwayScorer,
-    score_pathways_from_file,
 )
 from tal_downstream_derivatives import TAL_DOWNSTREAM_DERIVATIVES
 from tal_reaction_whitelist import TAL_REACTION_WHITELIST
@@ -73,6 +76,14 @@ HELPERS = ["O", "[H][H]"]
 GENERATIONS = 2
 TOP_N = 10
 MAX_NUM_RXNS = 3
+
+# Precoded target for the directed-search scene. This is a TAL
+# self-Diels-Alder cycloadduct — a known polyketide cyclization
+# product. Reachable in 1 chem step from TAL, so it demos cleanly
+# at gen=2. To demo a different target (e.g. sorbic acid), set
+# DIRECTED_TARGET to its SMILES and bump GENERATIONS to 3+.
+DIRECTED_TARGET = "CC12C=C(O)C(C(=O)O1)C1C(O)=CC(=O)OC12C"
+DIRECTED_TARGET_LABEL = "TAL Diels-Alder cycloadduct (polyketide dimer)"
 
 
 def banner(text, char="="):
@@ -196,45 +207,78 @@ def scene_2_exploration():
 
 
 # =====================================================================
-# Scene 3 — directed search + full 5-criteria ranking
+# Scene 3 — directed search: precoded target, find + rank routes
 # =====================================================================
-def scene_3_ranking(exploration_result):
-    banner("[3/4]  RANKING  —  full 5-criteria scoring on a chosen target")
+def scene_3_directed_search(exploration_result):
+    banner("[3/4]  DIRECTED SEARCH  —  precoded target, ranked routes")
+    print()
+    print("Question (from the project brief):")
+    print('  "I want to make a specific molecule from TAL. What routes')
+    print('   exist, and which is the best one?"')
+    print()
+    print(f"Precoded target:  {DIRECTED_TARGET_LABEL}")
+    print(f"                  {DIRECTED_TARGET}")
+    print()
+    print("Reusing the network built in Scene 2 (no re-expansion).")
 
-    top = exploration_result["top_endpoints"]
-    if not top:
-        print("\n  (no endpoints from exploration to rank — skipping)")
+    network = exploration_result["network"]
+    starter_smi = exploration_result["starter_smiles"]
+    helper_smiles = exploration_result["helper_smiles"]
+
+    directed_job = f"{JOB_NAME}_directed"
+    try:
+        find_pathways_to_target(
+            network=network,
+            starter=starter_smi,
+            target=DIRECTED_TARGET,
+            helpers=helper_smiles,
+            generations=GENERATIONS,
+            max_num_rxns=4,
+            job_name=directed_job,
+        )
+        pathways = load_pathways_from_file(directed_job)
+    except Exception as exc:
+        print(f"\n  Pathway search failed: {exc}")
         return
-    target = top[0]
-    target_job = f"{JOB_NAME}_ep01"
 
-    print()
-    print(f"Target (top exploration hit): {target.smiles}")
-    print()
-    print("Pathway pool already built in Scene 2 — now we apply the")
-    print("full 5-criteria scorer with the default weights.")
+    if not pathways:
+        print(f"\n  No pathways to the target at gen={GENERATIONS}.")
+        print(f"  Either the target isn't reachable in this network, or")
+        print(f"  the route exceeds max_num_rxns. Try gen=3 for")
+        print(f"  literature targets like sorbic acid.")
+        return
+
+    print(f"\n{len(pathways)} pathway(s) found. Scoring with all 5 criteria...")
 
     scorer = WeightedPathwayScorer([
-        (StepsCriterion(),                    4.0),
-        (ThermoCriterion(),                   2.0),
-        (IntermediateStabilityCriterion(),    2.0),
-        (ProcedureDiversityCriterion(),       2.0),
-        (ChemBioSwitchCriterion(),            2.0),
+        (StepsCriterion(),                  4.0),
+        (ThermoCriterion(),                 2.0),
+        (IntermediateStabilityCriterion(),  2.0),
+        (ProcedureDiversityCriterion(),     2.0),
+        (ChemBioSwitchCriterion(),          2.0),
     ])
+    scored = scorer.score(pathways)
+    scored.sort(key=lambda sp: sp.final_score, reverse=True)
 
-    try:
-        scored = score_pathways_from_file(target_job, scorer)
-    except FileNotFoundError:
-        print(f"\n  (pathway file {target_job}_pathways.txt not found — "
-              f"Scene 2 must have failed)")
-        return
-
-    print(f"\nScored {len(scored)} pathway(s). Top 3:")
+    print(f"\nTop {min(3, len(scored))} ranked routes:")
     for i, sp in enumerate(scored[:3], 1):
-        print(f"\n  Pathway {i}  —  final score {sp.final_score:.3f}  "
+        print()
+        print(f"  Route {i}  —  final score {sp.final_score:.3f}  "
               f"({sp.pathway.num_steps} steps)")
+        print(f"  Criterion breakdown:")
         for name, val in sp.components.items():
             print(f"    {name:32s} = {val:.3f}")
+        print(f"  Reaction steps:")
+        for j, rxn in enumerate(sp.pathway.reactions, 1):
+            try:
+                reactants_part, op_name, _, products_part = rxn.split(">")
+                reactants = reactants_part.split(".")
+                products = products_part.split(".")
+                print(f"    {j}. [{op_name}]")
+                print(f"       {' + '.join(reactants)}  →  "
+                      f"{' + '.join(products)}")
+            except Exception:
+                print(f"    {j}. {rxn}")
 
 
 # =====================================================================
@@ -279,6 +323,10 @@ def cleanup_artifacts():
         f"{JOB_NAME}_ep*_network_pretreated.json",
         f"{JOB_NAME}_ep*_reaxys_batch_*.txt",
         f"{JOB_NAME}_ep*_reaxys_batch_*.csv",
+        f"{JOB_NAME}_directed_pathways.txt",
+        f"{JOB_NAME}_directed_network_pretreated.json",
+        f"{JOB_NAME}_directed_reaxys_batch_*.txt",
+        f"{JOB_NAME}_directed_reaxys_batch_*.csv",
         f"{JOB_NAME}_*_saved_network*",
         f"{JOB_NAME}_network_pretreated.json",
         f"{JOB_NAME}_pathways.txt",
@@ -301,7 +349,7 @@ def main():
     t_total = time.time()
     scene_1_architecture()
     exploration_result = scene_2_exploration()
-    scene_3_ranking(exploration_result)
+    scene_3_directed_search(exploration_result)
     scene_4_next()
 
     n_cleaned = cleanup_artifacts()

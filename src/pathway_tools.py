@@ -337,6 +337,9 @@ def explore_downstream(
         "pathways": pathways_by_endpoint,
         "derivative_matches": matches,
         "derivative_missing": missing,
+        "network": network,
+        "starter_smiles": starter_smi,
+        "helper_smiles": helper_smiles_list,
     }
 
     _write_exploration_report(result, job_name)
