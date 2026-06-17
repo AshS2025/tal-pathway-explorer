@@ -32,6 +32,7 @@ From the repo root:
 Runs in well under a minute on a laptop.
 """
 
+import glob
 import os
 import sys
 import time
@@ -268,6 +269,33 @@ Medium-term:
 
 
 # =====================================================================
+def cleanup_artifacts():
+    """
+    Remove DORAnet's per-job intermediate files so the project root
+    stays uncluttered. Keeps the consolidated exploration report.
+    """
+    patterns = [
+        f"{JOB_NAME}_ep*_pathways.txt",
+        f"{JOB_NAME}_ep*_network_pretreated.json",
+        f"{JOB_NAME}_ep*_reaxys_batch_*.txt",
+        f"{JOB_NAME}_ep*_reaxys_batch_*.csv",
+        f"{JOB_NAME}_*_saved_network*",
+        f"{JOB_NAME}_network_pretreated.json",
+        f"{JOB_NAME}_pathways.txt",
+        f"{JOB_NAME}_reaxys_batch_*.txt",
+        f"{JOB_NAME}_reaxys_batch_*.csv",
+    ]
+    n_removed = 0
+    for pat in patterns:
+        for path in glob.glob(pat):
+            try:
+                os.remove(path)
+                n_removed += 1
+            except OSError:
+                pass
+    return n_removed
+
+
 def main():
     banner("TAL PATHWAY EXPLORER  —  COMPREHENSIVE DEMO", char="#")
     t_total = time.time()
@@ -275,9 +303,16 @@ def main():
     exploration_result = scene_2_exploration()
     scene_3_ranking(exploration_result)
     scene_4_next()
+
+    n_cleaned = cleanup_artifacts()
+
     banner(f"DEMO COMPLETE  ({time.time() - t_total:.1f}s total)", char="#")
     print(f"\nFull markdown report: {JOB_NAME}_exploration_report.md")
-    print("Open in any markdown viewer (VS Code: Ctrl+Shift+V).\n")
+    print("Open in any markdown viewer (VS Code: Ctrl+Shift+V).")
+    if n_cleaned:
+        print(f"\n[housekeeping] Cleaned up {n_cleaned} intermediate artifact files.\n")
+    else:
+        print()
 
 
 if __name__ == "__main__":
