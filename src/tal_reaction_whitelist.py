@@ -559,6 +559,20 @@ TAL_REACTION_WHITELIST = frozenset({
     "Hydroformylation",
     # Already listed above; duplicate entry harmless in a frozenset.
 
+    # ----- CRITICAL FOR TAL CHEMISTRY -----
+    "Keto-enol Tautomerization",
+    "Keto-enol Tautomerization Reverse",
+    # WHY THESE MATTER: RDKit perceives TAL's pyranone ring as
+    # aromatic, which blocks every "single bond in ring" operator
+    # (hydrolysis, etc.) from firing. The Reverse tautomerization
+    # operator converts aromatic TAL into the non-aromatic
+    # CC1=CC(=O)CC(=O)O1 form — where the standard
+    # "Hydrolysis of Esters, Intramolecular" THEN fires and opens
+    # the ring to triacetic acid. From triacetic acid, the
+    # already-whitelisted "Carboxylic Acids Decarboxylation"
+    # produces acetylacetone + CO2 — the literature route.
+    # Without these tautomerization ops, ALL ring-opening
+    # chemistry of TAL is silently blocked.
 })
 
 
