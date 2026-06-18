@@ -9,6 +9,7 @@ __pycache__/
 *_reaxys_batch_query.txt
 *_reaxys_batch_result.csv
 *_exploration_report.md
+*_pathways_visualized.pdf
 
 # SMILES input files written by demo/test scripts
 demo_*.smi
