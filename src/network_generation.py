@@ -273,7 +273,7 @@ def _load_bio_ops_into_network(
     rules = pd.read_csv(AVAILABLE_RULESETS[ruleset], sep="\t")
     n_whitelisted = 0
     n_loaded = 0
-    for idx, smarts_str in enumerate(rules["SMARTS"]):
+    for idx, raw_smarts in enumerate(rules["SMARTS"]):
         name = rules["Name"][idx]
         if name not in whitelist:
             continue
@@ -285,14 +285,39 @@ def _load_bio_ops_into_network(
             or set(excluded_cofactors) & set(product_types)
         ):
             continue
+
+        # ---- direction handling -----------------------------------
+        # JN1224MIN's SMARTS are written forward: LHS = substrates,
+        # RHS = products. For retro, we want to fire enzymes "in
+        # reverse" — i.e., from a target product, find the substrate(s)
+        # that would have produced it. We do that by flipping the
+        # SMARTS at the >> token AND swapping the Reactants/Products
+        # cofactor-slot labels so the meta stays consistent with what
+        # the operator now consumes/produces.
+        #
+        # Note: most enzymatic reactions are operationally reversible
+        # under their natural conditions (Haldane), so flipping the
+        # SMARTS is biochemically defensible. The exception is irreversible
+        # decarboxylations etc — those would need an explicit irreversible
+        # flag we don't carry yet. Flagged as a known limitation for now.
+        if direction == "retro":
+            lhs, rhs = raw_smarts.split(">>", 1)
+            smarts_str = f"{rhs}>>{lhs}"
+            reactants_meta = rules["Products"][idx]
+            products_meta = rules["Reactants"][idx]
+        else:
+            smarts_str = raw_smarts
+            reactants_meta = rules["Reactants"][idx]
+            products_meta = rules["Products"][idx]
+
         n_reactants = len(smarts_str.split(">>")[0].split("."))
         n_products = len(smarts_str.split(">>")[1].split("."))
         meta = {
             "name": name,
             # Bio-specific meta — used by enzyme lookup, also kept so
             # the bio recipe filter can introspect Reactants if needed.
-            "Reactants": rules["Reactants"][idx],
-            "Products": rules["Products"][idx],
+            "Reactants": reactants_meta,
+            "Products": products_meta,
             "Comments": rules["Comments"][idx],  # UniProt enzyme IDs
             "SMARTS": smarts_str,
             "is_bio": True,
