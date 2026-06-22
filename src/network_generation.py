@@ -549,7 +549,12 @@ def generate_network_tal(
                 op for op in op_smarts if op.name in TAL_REACTION_WHITELIST
             ]
         elif direction == "retro":
-            smarts_list = op_retro_smarts
+            # DORAnet retro ops are named the same as their forward
+            # counterparts, so the TAL chem whitelist filters both
+            # sides symmetrically.
+            smarts_list = [
+                op for op in op_retro_smarts if op.name in TAL_REACTION_WHITELIST
+            ]
         else:
             smarts_list = []
 
