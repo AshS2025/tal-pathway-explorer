@@ -26,6 +26,7 @@ RDLogger.DisableLog("rdApp.*")
 
 from network_generation import generate_network_tal
 from pathway_tools import find_pathways_to_target, load_pathways_from_file
+from recipe_rankers import ForwardProductTanimotoRanker
 
 
 STARTER_FILE = "test_novel_starter.smi"
@@ -54,12 +55,15 @@ def main():
         job_name="novel_test",
         starters=STARTER_FILE,
         helpers=HELPER_FILE,
-        gen=3,
+        gen=4,
         direction="forward",
         molecule_thermo_calculator=None,
         max_rxn_thermo_change=15.0,
-        max_atoms={"C": 25, "O": 6, "N": 0, "S": 0},
-        max_molecular_weight=300,
+        # Tight atom limits keep cartesian tractable at gen=4 — the
+        # full TAL+CO2+H2O+acetylacetone chain stays well within these
+        # bounds (TAL=6C, triacetic=6C, acetylacetone=5C).
+        max_atoms={"C": 8, "O": 5, "N": 0, "S": 0},
+        max_molecular_weight=200,
         allow_multiple_reactants="default",
         strategy="cartesian",
         min_carbons=0,
@@ -108,8 +112,8 @@ def main():
         starter=TAL,
         target=TARGET,
         helpers=["O", "[H][H]"],
-        generations=3,
-        max_num_rxns=4,
+        generations=4,
+        max_num_rxns=10,
         job_name="novel_test",
     )
 
