@@ -11,6 +11,5 @@ __pycache__/
 *_exploration_report.md
 *_pathways_visualized.pdf
 
-# SMILES input files written by demo/test scripts
-demo_*.smi
-test_*.smi
+# SMILES input files — always written by demo/test/probe scripts, never source
+*.smi
