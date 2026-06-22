@@ -372,7 +372,7 @@ def generate_network_tal(
     include_chem=True,
     include_bio=True,
     bio_ruleset="JN1224MIN",
-    bio_allow_multiple_reactants=True,
+    bio_allow_multiple_reactants=False,
     excluded_cofactors=_DEFAULT_EXCLUDED_COFACTORS,
     # --- future hooks ---
     # cost_calculator=None,     # TODO: add cost-based branch pruning
@@ -447,10 +447,18 @@ def generate_network_tal(
     bio_ruleset : str
         "JN1224MIN" (1224 rules, default) or "JN3604IMT" (3604 rules).
     bio_allow_multiple_reactants : bool
-        If True, bio operators may have 2+ cofactors / no non-cofactor
-        substrate in a recipe. REQUIRED for the polyketide route
-        (3 × acetyl-CoA → TAL, where every reactant is a cofactor).
-        If False, applies the bio Single-Substrate filter.
+        Default False — applies the bio Single-Substrate filter, which
+        is the regime that keeps non-polyketide bio expansions
+        tractable (DORAnet's normal assumption: one variable substrate
+        per recipe, cofactors fill the other slots).
+
+        Set to True ONLY when expanding through polyketide chemistry,
+        where a single reaction legitimately consumes multiple
+        substrates that all happen to be cofactor-like (e.g. the TAL
+        biosynthesis route: 1 × acetyl-CoA + 2 × malonyl-CoA → TAL,
+        every reactant is a cofactor/CoA-thioester). Without this flag
+        the polyketide step gets silently filtered out; with it,
+        non-polyketide bio expansions become combinatorially expensive.
     excluded_cofactors : tuple
         Cofactor IDs to exclude from injection. Default mirrors DORAnet's
         ("CARBONYL_CoF", "AMINO_CoF") which over-fire.

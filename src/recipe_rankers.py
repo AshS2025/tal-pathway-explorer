@@ -149,6 +149,101 @@ class ForwardProductTanimotoRanker(interfaces.RecipeRanker):
 
 
 # =====================================================================
+# Retro: feedstock-proximity ranker (max sim across feedstock pool)
+# =====================================================================
+
+class FeedstockProximityRanker(interfaces.RecipeRanker):
+    """
+    Retro-mode ranker. In retro expansion, an operator's RDKit reaction
+    object generates predicted upstream substrates from a downstream
+    product. This ranker scores each recipe by the MAX Tanimoto
+    similarity between any predicted substrate and any molecule in a
+    user-supplied feedstock pool.
+
+    Why this works for retro
+    ------------------------
+    Forward goal-directed search via Tanimoto-to-target only works
+    because forward chemistry GROWS molecules toward the target. Retro
+    chemistry FRAGMENTS molecules backward; the resulting upstream
+    pieces don't look like the final target. But they DO need to
+    eventually look like a feedstock. Pulling the beam toward recipes
+    whose predicted substrates resemble glucose (or any other feedstock)
+    gives the search a directional signal that the forward
+    Tanimoto-to-target heuristic explicitly lacks for retro.
+
+    Pool semantics
+    --------------
+    Score = max over (predicted_substrate, feedstock) pairs. A recipe
+    whose predicted substrates match ANY feedstock highly scores high;
+    we don't require matching all feedstocks. Start with a single-entry
+    pool (just glucose) to validate the path; later add glycerol,
+    acetate, acetyl-CoA, etc.
+
+    Parameters
+    ----------
+    feedstock_smiles_list : list[str]
+        Pool of candidate feedstock SMILES. Empty pool raises.
+    radius, n_bits : int
+        Morgan fingerprint params (defaults match ForwardProductTanimotoRanker).
+    """
+
+    def __init__(self, feedstock_smiles_list, radius=2, n_bits=2048):
+        if not feedstock_smiles_list:
+            raise ValueError("FeedstockProximityRanker needs at least one feedstock")
+        self.radius = radius
+        self.n_bits = n_bits
+        self.feedstock_fps = []
+        for smi in feedstock_smiles_list:
+            m = Chem.MolFromSmiles(smi)
+            if m is None:
+                raise ValueError(f"Invalid feedstock SMILES: {smi!r}")
+            self.feedstock_fps.append(_morgan_fp(m, radius, n_bits))
+        self._fp_cache = {}
+
+    def _fp_for_predicted(self, rdkit_mol):
+        try:
+            Chem.SanitizeMol(rdkit_mol)
+        except Exception:
+            return None
+        smi = Chem.MolToSmiles(rdkit_mol)
+        fp = self._fp_cache.get(smi)
+        if fp is None:
+            fp = _morgan_fp(rdkit_mol, self.radius, self.n_bits)
+            self._fp_cache[smi] = fp
+        return fp
+
+    def __call__(self, recipe, min_rank=None):
+        op = recipe.operator.item
+        if not hasattr(op, "rdkitrxn"):
+            return 0.0
+        reactant_mols = []
+        for r in recipe.reactants:
+            if not isinstance(r.item, interfaces.MolDatRDKit):
+                return 0.0
+            reactant_mols.append(r.item.rdkitmol)
+        try:
+            product_sets = op.rdkitrxn.RunReactants(tuple(reactant_mols))
+        except Exception:
+            return 0.0
+
+        max_sim = 0.0
+        for product_set in product_sets:
+            for product in product_set:
+                fp = self._fp_for_predicted(product)
+                if fp is None:
+                    continue
+                for feed_fp in self.feedstock_fps:
+                    sim = DataStructs.TanimotoSimilarity(feed_fp, fp)
+                    if sim > max_sim:
+                        max_sim = sim
+        return max_sim
+
+    @property
+    def meta_required(self):
+        return interfaces.MetaKeyPacket()
+
+
+# =====================================================================
 # Criterion: Molecular-weight fit to a target MW
 # =====================================================================
 
