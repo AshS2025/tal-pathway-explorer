@@ -11,5 +11,10 @@ __pycache__/
 *_exploration_report.md
 *_pathways_visualized.pdf
 
+# Pathway visualization outputs (HTML, vendored JS, rendered molecule PNGs)
+*_graph.html
+pathway_images/
+lib/
+
 # SMILES input files — always written by demo/test/probe scripts, never source
 *.smi
