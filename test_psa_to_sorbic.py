@@ -28,6 +28,7 @@ RDLogger.DisableLog("rdApp.*")
 from network_generation import generate_network_tal
 from pathway_tools import find_pathways_to_target, load_pathways_from_file
 from recipe_rankers import ForwardProductTanimotoRanker
+from rmg_thermo import RMGThermoClient
 
 
 STARTER_FILE = "test_psa_starter.smi"
@@ -57,29 +58,40 @@ def main():
     write_smi(HELPER_FILE, ["O", "[H][H]"])
 
     t0 = time.time()
-    network = generate_network_tal(
-        job_name="psa_test",
-        starters=STARTER_FILE,
-        helpers=HELPER_FILE,
-        gen=4,
-        direction="forward",
-        molecule_thermo_calculator=None,
-        max_rxn_thermo_change=15.0,
-        # Same tight cap as the TAL->sorbic test
-        max_atoms={"C": 6, "O": 3, "N": 0, "S": 0},
-        max_molecular_weight=150,
-        allow_multiple_reactants="default",
-        strategy="priority_queue",
-        targets=SORBIC_ACID,
-        recipe_ranker=ForwardProductTanimotoRanker(SORBIC_ACID),
-        beam_size=200,
-        min_carbons=0,
-        include_chem=True,
-        include_bio=False,
-    )
+    # Spawn the RMG thermo bridge. Inside this `with` block:
+    #   - molecule_thermo_calculator=calc passes RMG into DORAnet's
+    #     existing Chem_Rxn_dH_Calculator + Rxn_dH_Filter pipeline,
+    #   - reactions whose computed dH exceeds max_rxn_thermo_change
+    #     (in kJ/mol — RMG's unit) are HARD-REJECTED, never enter
+    #     the network. That cuts ~30% of candidate reactions on
+    #     this small expansion (see test_rmg_pruning.py for the
+    #     before/after numbers).
+    print("Spawning RMG thermo server (~3-10s for first load)...")
+    with RMGThermoClient() as calc:
+        network = generate_network_tal(
+            job_name="psa_test",
+            starters=STARTER_FILE,
+            helpers=HELPER_FILE,
+            gen=4,
+            direction="forward",
+            molecule_thermo_calculator=calc,    # ← was None
+            max_rxn_thermo_change=15.0,         # kJ/mol — matches RMG units
+            # Same tight cap as the TAL->sorbic test
+            max_atoms={"C": 6, "O": 3, "N": 0, "S": 0},
+            max_molecular_weight=150,
+            allow_multiple_reactants="default",
+            strategy="priority_queue",
+            targets=SORBIC_ACID,
+            recipe_ranker=ForwardProductTanimotoRanker(SORBIC_ACID),
+            beam_size=200,
+            min_carbons=0,
+            include_chem=True,
+            include_bio=False,
+        )
 
-    elapsed = time.time() - t0
-    print(f"\nExpansion finished in {elapsed:.1f}s.")
+        elapsed = time.time() - t0
+        print(f"\nExpansion finished in {elapsed:.1f}s.")
+        print(f"  RMG queries: {len(calc._cache)} unique molecules looked up")
 
     from rdkit import Chem
     target_canon = Chem.MolToSmiles(Chem.MolFromSmiles(SORBIC_ACID))

@@ -7,9 +7,45 @@ from doranet.modules.post_processing.post_processing import (
     pretreat_networks,
     pathway_finder,
 )
+from doranet.modules.post_processing import post_processing as _doranet_pp
+from doranet.modules.enzymatic.generate_network import AVAILABLE_RULESETS as _BIO_RULESETS
 
 from rdkit import Chem
 import json
+import pandas as _pd
+
+
+# ---------------------------------------------------------------------
+# Bio rule name patch
+# ---------------------------------------------------------------------
+# DORAnet's pathway_finder detects bio reactions by checking if each
+# reaction's operator name is in `post_processing.bio_rxn_names`, which
+# at import time is populated ONLY from JN3604IMT_rules.tsv. Our wrapper
+# expands using JN1224MIN, whose rule names (`rule0087`, `rule1118`,
+# `rule0891`, …) are largely absent from JN3604IMT. Without this patch
+# the pathway finder sees our bio reactions as chem reactions, never
+# auto-adds cofactors to the helper set, and counts cofactor mass in
+# atom economy — which kills the 0.3 atom-economy threshold for every
+# CoA-tethered step and returns "No pathway found" even when the target
+# is unambiguously in the network.
+#
+# Fix: union JN1224MIN's rule name set into `bio_rxn_names` once at
+# import time. Idempotent: re-running just no-ops on already-present names.
+def _patch_bio_rxn_names() -> int:
+    added = 0
+    for ruleset_path in _BIO_RULESETS.values():
+        try:
+            df = _pd.read_csv(ruleset_path, sep="\t")
+        except FileNotFoundError:
+            continue
+        for name in df["Name"]:
+            if name not in _doranet_pp.bio_rxn_names:
+                _doranet_pp.bio_rxn_names.add(name)
+                added += 1
+    return added
+
+
+_BIO_RXN_NAMES_ADDED = _patch_bio_rxn_names()
 
 
 # =====================================================================

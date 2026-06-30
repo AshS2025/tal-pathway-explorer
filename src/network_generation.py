@@ -374,6 +374,8 @@ def generate_network_tal(
     bio_ruleset="JN1224MIN",
     bio_allow_multiple_reactants=False,
     excluded_cofactors=_DEFAULT_EXCLUDED_COFACTORS,
+    bio_whitelist=None,                # if None, falls back to TAL_BIO_REACTION_WHITELIST
+    included_cofactors=None,           # if set, ONLY these cofactor IDs are loaded
     # --- future hooks ---
     # cost_calculator=None,     # TODO: add cost-based branch pruning
 ):
@@ -517,16 +519,34 @@ def generate_network_tal(
 
     n_cofactors_loaded = 0
     if include_bio:
-        for cof_id, cof_smi in cofactors_clean_dict.items():
-            if cof_id in excluded_cofactors:
-                continue
-            network.add_mol(
-                engine.mol.rdkit(cof_smi),
-                meta={
-                    "SMILES": Chem.MolToSmiles(Chem.MolFromSmiles(cof_smi)),
-                },
-            )
-            n_cofactors_loaded += 1
+        # included_cofactors takes precedence over excluded_cofactors:
+        # if it's set, ONLY those cofactors are loaded. Useful for
+        # focused bio chemistry like the polyketide pathway, where
+        # most of DORAnet's 41 cofactors are irrelevant and just inflate
+        # the combinatorial space.
+        if included_cofactors is not None:
+            included_set = set(included_cofactors)
+            for cof_id, cof_smi in cofactors_clean_dict.items():
+                if cof_id not in included_set:
+                    continue
+                network.add_mol(
+                    engine.mol.rdkit(cof_smi),
+                    meta={
+                        "SMILES": Chem.MolToSmiles(Chem.MolFromSmiles(cof_smi)),
+                    },
+                )
+                n_cofactors_loaded += 1
+        else:
+            for cof_id, cof_smi in cofactors_clean_dict.items():
+                if cof_id in excluded_cofactors:
+                    continue
+                network.add_mol(
+                    engine.mol.rdkit(cof_smi),
+                    meta={
+                        "SMILES": Chem.MolToSmiles(Chem.MolFromSmiles(cof_smi)),
+                    },
+                )
+                n_cofactors_loaded += 1
 
     my_start_i = -1
     for smiles in starters:
@@ -590,13 +610,20 @@ def generate_network_tal(
     # ── bio operator loading ───────────────────────────────────────────
     n_bio_ops = 0
     if include_bio:
+        # If caller supplied a custom bio_whitelist (e.g. the tiny
+        # 7-rule polyketide subset), use it. Otherwise fall back to
+        # the broad TAL bio whitelist.
+        whitelist_to_use = (
+            bio_whitelist if bio_whitelist is not None
+            else TAL_BIO_REACTION_WHITELIST
+        )
         n_bio_ops, n_bio_whitelisted = _load_bio_ops_into_network(
             network,
             engine,
             ruleset=bio_ruleset,
             direction=direction,
             excluded_cofactors=set(excluded_cofactors),
-            whitelist=TAL_BIO_REACTION_WHITELIST,
+            whitelist=whitelist_to_use,
         )
         print(
             f"Bio: ruleset={bio_ruleset}, cofactors loaded={n_cofactors_loaded}, "
