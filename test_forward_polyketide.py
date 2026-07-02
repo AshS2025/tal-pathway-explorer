@@ -188,6 +188,10 @@ def main():
         starter_label="acetyl-CoA",
         target_label="TAL",
         pathway_filter="all",
+        # Co-substrate the polyketide chemistry consumes alongside
+        # acetyl-CoA. Label it so it doesn't show up as a generic
+        # "CC(C)(COP..." SMILES node.
+        extra_labels={MALONYL_COA: "malonyl-CoA"},
     )
     print(f"  {html_path}")
     print(f"\nTotal: {time.time()-t0:.1f}s")

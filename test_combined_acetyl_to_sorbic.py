@@ -219,8 +219,13 @@ def main():
         target_smiles=SORBIC_ACID,
         starter_label="acetyl-CoA",
         target_label="sorbic acid",
-        helpers=[MALONYL_COA, "O", "[H][H]"],
+        # malonyl-CoA is a real co-substrate (not a hidden cofactor) —
+        # passed via extra_labels so it gets a human-readable label and
+        # is never hidden, even though its skeleton looks cofactor-ish.
+        # Helpers stay as the actual hidden molecules (water + H2).
+        helpers=["O", "[H][H]"],
         pathway_filter="all",
+        extra_labels={MALONYL_COA: "malonyl-CoA"},
     )
     print(f"      {html_path}")
     print(f"\nTotal runtime: {time.time() - overall_t0:.1f}s")
