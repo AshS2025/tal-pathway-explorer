@@ -18,3 +18,8 @@ lib/
 
 # SMILES input files — always written by demo/test/probe scripts, never source
 *.smi
+
+# Run logs and filtered/generated rule tables from test & probe runs
+*.log
+*_filtered_rules.tsv
+*_ruleset.tsv
