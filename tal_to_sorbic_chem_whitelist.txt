@@ -1,0 +1,14 @@
+# Chem reaction whitelist for the TAL -> sorbic acid network.
+# These are exactly the operators used by the pathways DORAnet finds
+# for TAL (Cc1cc(O)cc(=O)o1) -> sorbic acid (CC=CC=CC(=O)O) at gen=3,
+# bidirectional. Upload this in the "Chem reaction whitelist" field.
+# One operator name per line; '#' lines are ignored.
+Dehydration of Alcohol
+Dehydration of Alcohol, 2-step
+Hydration of Alkene, Addition of Alcohols or Acids to Alkenes
+Hydration of Ketone and Aldehyde
+Hydrodeoxygenation of Alcohol, Classic Synthesis of Aldehydes from Carboxylic Acids
+Hydrogenation of Alkene
+Hydrogenation of Ketones
+Hydrolysis of Ethers, Esters, Anhydrides, Intramolecular
+Keto-enol Tautomerization Reverse

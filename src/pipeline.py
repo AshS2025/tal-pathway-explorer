@@ -111,8 +111,11 @@ class PipelineConfig:
     max_atoms_o: int = 5
     max_atoms_n: int = 2
     max_rxn_dh: float = 15.0
-    # bio-specific
+    # operator whitelists — if None, each falls back to its built-in TAL
+    # default inside network_generation. When supplied (e.g. from a UI
+    # upload), the list FULLY REPLACES the default.
     bio_whitelist: Optional[List[str]] = None
+    chem_whitelist: Optional[List[str]] = None
     # thermo toggles
     enable_rmg: bool = False
     enable_equilibrator: bool = False
@@ -230,10 +233,16 @@ def run_pipeline(
     config: PipelineConfig,
     *,
     thermo_calc: Optional[Callable[[str], Optional[float]]] = None,
-    equilibrator_client: Optional[Any] = None,
 ) -> PipelineResult:
     """
-    Run the whole pipeline: expand → merge → trace → rank → decorate.
+    GENERATION phase: expand → merge → trace → parse. Returns the found
+    pathways UNRANKED (sorted by step count).
+
+    Ranking is deliberately NOT done here. DORAnet's pathway_ranking is
+    slow (minutes, single-threaded under Windows/Streamlit) and its
+    criterion weights are something the user tunes AFTER seeing the
+    pathways — so it's a separate, opt-in step: call `rank_pathways()`
+    with the chosen weights once these pathways are on screen.
 
     Parameters
     ----------
@@ -244,15 +253,12 @@ def run_pipeline(
         supplied and config.enable_rmg is True, gets passed through as
         DORAnet's molecule_thermo_calculator during expansion, so
         every reaction gets a real ΔH stored on the network.
-    equilibrator_client : EquilibratorClient or None
-        Object with `.dG_prime(rxn_smiles) → float | None`. When
-        supplied and config.enable_equilibrator is True, ranked
-        pathways get decorated with per-bio-step ΔG'° values and
-        pruned by config.equilibrator_prune_max_abs_dg.
 
     Returns
     -------
     PipelineResult
+        `.ranked_pathways` holds the UNRANKED pathways (final_score is
+        None); `.diagnostics["ranked"]` is False.
     """
     err = validate_config(config)
     if err:
@@ -288,6 +294,7 @@ def run_pipeline(
             include_bio=config.include_bio,
             directions=config.directions,
             bio_whitelist=config.bio_whitelist,
+            chem_whitelist=config.chem_whitelist,
             thermo_calc=effective_thermo,
         )
     except Exception as e:
@@ -311,13 +318,71 @@ def run_pipeline(
             },
         )
 
-    # ---- rank ----
+    # ---- parse (UNRANKED) ----
+    # Generation stops here — see the function docstring for why ranking
+    # is a separate step. Return the raw pathways sorted by step count so
+    # the UI can display them instantly.
+    pathways = _parse_unranked_pathways(config.job_name)
+    return PipelineResult(
+        ok=True,
+        error=None,
+        elapsed_seconds=time.time() - t0,
+        n_pathways=len(pathways),
+        ranked_pathways=pathways,
+        pathway_file_path=pathway_file,
+        diagnostics={
+            "ranked": False,
+            "domain": config.domain,
+            "directions": config.directions,
+        },
+    )
+
+
+def rank_pathways(
+    config: PipelineConfig,
+    *,
+    weights: Optional[dict] = None,
+    thermo_calc: Optional[Callable[[str], Optional[float]]] = None,
+    equilibrator_client: Optional[Any] = None,
+) -> PipelineResult:
+    """
+    RANKING phase: run DORAnet's pathway_ranking (with adjustable
+    criterion `weights`) on the pathways produced by a prior
+    `run_pipeline()` call, then optionally decorate/prune with
+    equilibrator. Requires `{config.job_name}_pathways.txt` to exist.
+
+    Parameters
+    ----------
+    weights : dict or None
+        DORAnet criterion weights (number_of_steps, reaction_thermo,
+        by_product_number, atom_economy, ...). None uses DEFAULT_WEIGHTS.
+    thermo_calc : callable or None
+        RMG-style SMILES → Hf calculator, used only when
+        config.enable_rmg is True.
+    equilibrator_client : EquilibratorClient or None
+        When supplied and config.enable_equilibrator is True, ranked
+        pathways get per-bio-step ΔG'° values and are pruned by
+        config.equilibrator_prune_max_abs_dg.
+    """
+    t0 = time.time()
+    pathway_file = f"{config.job_name}_pathways.txt"
+    if not os.path.exists(pathway_file):
+        return PipelineResult(
+            ok=False,
+            error="No pathways to rank — generate pathways first.",
+        )
+
+    starter = config.starter_smiles.strip()
+    target  = config.target_smiles.strip()
+    effective_thermo = thermo_calc if config.enable_rmg else None
+
     try:
         ranked = generate_base_rankings(
             starter=starter,
             target=target,
             helpers=["O", "[H][H]"],
             job_name=config.job_name,
+            weights=weights,
             molecule_thermo_calculator=effective_thermo,
         )
     except Exception as e:
@@ -325,11 +390,12 @@ def run_pipeline(
         ranked = _fallback_ranked(config.job_name)
         return PipelineResult(
             ok=True,
-            error=f"ranking failed ({type(e).__name__}: {e}); fallback list returned",
+            error=f"ranking failed ({type(e).__name__}: {e}); unranked list returned",
             elapsed_seconds=time.time() - t0,
             n_pathways=len(ranked),
             ranked_pathways=ranked,
             pathway_file_path=pathway_file,
+            diagnostics={"ranked": False},
         )
 
     # ---- equilibrator decoration + optional pruning ----
@@ -351,9 +417,8 @@ def run_pipeline(
         ranked_pathways=ranked,
         pathway_file_path=pathway_file,
         diagnostics={
+            "ranked": True,
             "equilibrator_pruned": n_pruned,
-            "domain": config.domain,
-            "directions": config.directions,
         },
     )
 
@@ -411,6 +476,7 @@ def _expand_and_trace(
     include_bio: bool,
     directions: List[str],
     bio_whitelist: Optional[List[str]],
+    chem_whitelist: Optional[List[str]],
     thermo_calc,
 ) -> None:
     """
@@ -459,6 +525,7 @@ def _expand_and_trace(
             max_molecular_weight=limits["max_mw"],
             max_rxn_thermo_change=limits["max_dh"],
             molecule_thermo_calculator=thermo_calc,
+            chem_whitelist=chem_whitelist,
         )
         # retro gets a smaller beam — feedstock-proximity is a coarser
         # guide than product-Tanimoto, so we spend fewer expansions there.
@@ -555,6 +622,42 @@ def _expand_and_trace(
         max_num_rxns=reach + 3,
         job_name=job_name,
     )
+
+
+def _parse_unranked_pathways(job_name: str) -> List[RankedPathway]:
+    """Parse the raw pathway file into RankedPathway objects sorted by
+    step count, WITHOUT running DORAnet's scorer. `final_score` is set to
+    None to signal "not yet ranked"; score-derived fields (atom economy,
+    by-products) stay at defaults until rank_pathways() fills them in.
+
+    Used by the generation phase so the UI can show pathways immediately.
+    """
+    try:
+        raw = load_pathways_from_file(job_name)
+    except FileNotFoundError:
+        return []
+    raw_sorted = sorted(raw, key=lambda p: p.num_steps)
+    out = []
+    for idx, p in enumerate(raw_sorted, 1):
+        smiles_list, names_list, dh_list = [], [], []
+        for rxn_str in p.reactions:
+            parsed = parse_reaction_string(rxn_str)
+            smiles_list.append(
+                ".".join(parsed["reactants"]) + ">>" + ".".join(parsed["products"])
+            )
+            names_list.append(parsed["op_name"])
+            dh_list.append(parsed["dH"])
+        out.append(RankedPathway(
+            rank=idx,
+            final_score=None,               # None == unranked
+            atomic_economy=0.0,
+            pathway_byproduct_count=0,
+            intermediate_byproducts={},
+            reaction_smiles=smiles_list,
+            reaction_names=names_list,
+            reaction_enthalpies=dh_list,
+        ))
+    return out
 
 
 def _fallback_ranked(job_name: str) -> List[RankedPathway]:

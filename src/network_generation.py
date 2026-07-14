@@ -375,6 +375,7 @@ def generate_network_tal(
     bio_allow_multiple_reactants=False,
     excluded_cofactors=_DEFAULT_EXCLUDED_COFACTORS,
     bio_whitelist=None,                # if None, falls back to TAL_BIO_REACTION_WHITELIST
+    chem_whitelist=None,               # if None, falls back to TAL_REACTION_WHITELIST
     included_cofactors=None,           # if set, ONLY these cofactor IDs are loaded
     # --- future hooks ---
     # cost_calculator=None,     # TODO: add cost-based branch pruning
@@ -564,17 +565,19 @@ def generate_network_tal(
     # ── chem operator loading ──────────────────────────────────────────
     n_chem_ops = 0
     if include_chem:
+        # Caller may override the chem operator whitelist (e.g. from a
+        # UI upload). If not supplied, fall back to the built-in TAL set.
+        chem_wl = (
+            set(chem_whitelist) if chem_whitelist is not None
+            else TAL_REACTION_WHITELIST
+        )
         if direction == "forward":
-            smarts_list = [
-                op for op in op_smarts if op.name in TAL_REACTION_WHITELIST
-            ]
+            smarts_list = [op for op in op_smarts if op.name in chem_wl]
         elif direction == "retro":
             # DORAnet retro ops are named the same as their forward
-            # counterparts, so the TAL chem whitelist filters both
-            # sides symmetrically.
-            smarts_list = [
-                op for op in op_retro_smarts if op.name in TAL_REACTION_WHITELIST
-            ]
+            # counterparts, so the chem whitelist filters both sides
+            # symmetrically.
+            smarts_list = [op for op in op_retro_smarts if op.name in chem_wl]
         else:
             smarts_list = []
 

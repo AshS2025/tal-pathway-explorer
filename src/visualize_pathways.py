@@ -34,9 +34,11 @@ Full SMILES always appears on hover.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
+from io import BytesIO
 from typing import Iterable, Optional, Union
 
 import networkx as nx
@@ -86,18 +88,30 @@ def _pathway_color_map(pathway_indices):
     }
 
 
-def _molecule_metadata_html(smi, pathways_member):
+def _molecule_metadata_html(smi, pathways_member, img_uri=None):
     """
-    Build an HTML tooltip for a node: SMILES, formula, MW, heavy-atom
+    Build an HTML tooltip for a node: the molecule's chemical structure
+    (rendered image) on top, followed by SMILES, formula, MW, heavy-atom
     count, ring count, and the pathways that include this molecule.
+
+    img_uri, if given, is a self-contained base64 PNG data URI of the
+    structure (see _render_molecule_data_uris) — embedded so the drawing
+    shows on hover even inside Streamlit's sandboxed iframe, where local
+    file paths would not load.
 
     pathways_member is a tuple/list of pathway indices for which this
     molecule appears in at least one reaction (computed in
     _build_networkx_graph).
     """
+    img_html = (
+        f'<img src="{img_uri}" width="200" '
+        f'style="display:block;margin:0 auto 6px;background:#fff;'
+        f'border:1px solid #ddd;border-radius:4px;">'
+        if img_uri else ""
+    )
     mol = Chem.MolFromSmiles(smi)
     if mol is None:
-        return f"<b>SMILES:</b> {smi}"
+        return f"{img_html}<b>SMILES:</b> {smi}"
     formula = rdMolDescriptors.CalcMolFormula(mol)
     mw = Descriptors.MolWt(mol)
     heavy = mol.GetNumHeavyAtoms()
@@ -107,6 +121,7 @@ def _molecule_metadata_html(smi, pathways_member):
         if pathways_member else "—"
     )
     return (
+        f"{img_html}"
         f"<b>SMILES:</b> {smi}<br>"
         f"<b>Formula:</b> {formula}<br>"
         f"<b>MW:</b> {mw:.2f} g/mol<br>"
@@ -225,14 +240,16 @@ def visualize_pathways(
     # Step 2: compute positions in NetworkX
     positions = _compute_positions(G)
 
-    # Render molecule images (RDKit -> PNG)
-    img_paths = _render_molecule_pngs(set(G.nodes), img_dir)
+    # Render molecule structures as self-contained base64 PNG data URIs.
+    # Used for BOTH the node thumbnails and the hover tooltips, so both
+    # render reliably inside Streamlit's sandboxed iframe.
+    img_data_uris = _render_molecule_data_uris(set(G.nodes))
 
     # Step 3: hand to PyVis purely as renderer
     _render_to_pyvis(
         G,
         positions,
-        img_paths,
+        img_data_uris,
         starter_smiles=starter_smiles,
         target_smiles=target_smiles,
         starter_label=starter_label,
@@ -514,6 +531,32 @@ def _render_molecule_pngs(smiles_set, out_dir, size=(160, 160)):
     return paths
 
 
+def _render_molecule_data_uris(smiles_set, size=(200, 200)):
+    """Render each molecule to a base64-encoded PNG *data URI*.
+
+    Unlike _render_molecule_pngs (which writes files and returns paths),
+    these URIs are self-contained, so the images render both as node
+    thumbnails AND inside hover tooltips — and they survive being
+    embedded in Streamlit's sandboxed iframe, where relative file paths
+    silently fail to load. Also makes the downloaded HTML fully portable
+    (no pathway_images/ folder needed).
+    """
+    uris = {}
+    for smi in smiles_set:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            continue
+        try:
+            img = Draw.MolToImage(mol, size=size)
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            uris[smi] = "data:image/png;base64," + b64
+        except Exception:
+            continue
+    return uris
+
+
 def _short_smiles(smi, max_len=22):
     """Truncate long SMILES so they fit cleanly under a node."""
     return smi if len(smi) <= max_len else smi[:max_len - 3] + "..."
@@ -522,7 +565,7 @@ def _short_smiles(smi, max_len=22):
 def _render_to_pyvis(
     G,
     positions,
-    img_paths,
+    img_data_uris,
     *,
     starter_smiles,
     target_smiles,
@@ -588,7 +631,9 @@ def _render_to_pyvis(
 
         kwargs = dict(
             label=label,
-            title=_molecule_metadata_html(smi, node_pathways),
+            title=_molecule_metadata_html(
+                smi, node_pathways, img_uri=img_data_uris.get(smi)
+            ),
             x=float(x),
             y=float(y),
             physics=False,
@@ -599,9 +644,9 @@ def _render_to_pyvis(
             font={"size": 16, "color": font_color, "strokeWidth": 0,
                   "multi": True},
         )
-        if smi in img_paths:
+        if smi in img_data_uris:
             kwargs["shape"] = "image"
-            kwargs["image"] = img_paths[smi]
+            kwargs["image"] = img_data_uris[smi]
         net.add_node(smi, **kwargs)
 
     # Build edges with stable IDs so the JS click handler can correlate

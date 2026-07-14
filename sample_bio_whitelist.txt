@@ -1,0 +1,5 @@
+# Sample bio rule whitelist — one JN1224MIN rule per line.
+# The 3-rule polyketide chain for acetyl-CoA -> TAL.
+rule1118
+rule0087
+rule0891

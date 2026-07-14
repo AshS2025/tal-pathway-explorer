@@ -1,0 +1,9 @@
+# Sample chem reaction whitelist — one operator name per line.
+# Lines starting with # are ignored. Upload this to the
+# "Chem reaction whitelist" field to fully replace the default 156.
+Aldol Condensation
+Aldol Condensation, Intramolecular
+Dehydration of Alcohol
+Hydrolysis of Ethers, Esters, Anhydrides
+Acid Anhydrides React with Alcohols to Form Esters
+Transesterification
