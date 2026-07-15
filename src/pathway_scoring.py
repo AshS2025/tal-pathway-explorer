@@ -30,8 +30,13 @@ their own `weights` dict to `generate_base_rankings`.
 from __future__ import annotations
 
 import ast
+import math
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
+
+from rdkit import Chem
+from rdkit.Chem import Descriptors
 
 from doranet.modules.post_processing.post_processing import pathway_ranking
 
@@ -68,6 +73,15 @@ class RankedPathway:
     equilibrator_max_dg: Optional[float] = None
     equilibrator_avg_dg: Optional[float] = None
     equilibrator_coverage: float = 0.0        # fraction of steps we could score
+    # Lemnisca blend — filled in by apply_lemnisca_blend().
+    #   lemnisca_score  = the Lemnisca sub-score (geomean of the custom
+    #                     criteria: stability, diversity, ...), 0–1.
+    #   blended_score   = the FINAL ranking key = geomean(DORAnet, Lemnisca)
+    #                     with the tier-2 layer weights, 0–1.
+    #   lemnisca_components = raw 0–1 grade per criterion (incl. "doranet").
+    lemnisca_score: Optional[float] = None
+    blended_score: Optional[float] = None
+    lemnisca_components: dict = field(default_factory=dict)
 
     @property
     def num_steps(self) -> int:
@@ -317,3 +331,299 @@ def _parse_one_block(block: str) -> Optional[RankedPathway]:
         reaction_names=names_block,
         reaction_enthalpies=enthalpies,
     )
+
+
+# ======================================================================
+# "Lemnisca" blend — custom criteria layered ON TOP of DORAnet's score
+# ======================================================================
+#
+# We do NOT reimplement DORAnet's scoring. DORAnet's whole composite
+# (steps, thermo, atom economy, by-products — with the user's weights)
+# enters the blend as ONE ingredient via DoranetScoreCriterion. On top
+# of it we add only the criteria DORAnet lacks: intermediate stability
+# and procedure diversity (cost / toxicity / DORA-XGB feasibility come
+# later). apply_lemnisca_blend() combines them into `lemnisca_score` and
+# re-orders the pathways.
+#
+# Convention (same as DORAnet): each criterion returns a list[float],
+# one score per pathway in [0, 1], HIGHER = BETTER.
+
+
+class PathwayCriterion(ABC):
+    """A scoring criterion over a batch of RankedPathway objects.
+
+    `floor` is where this criterion's grade bottoms out when blended into
+    the geometric mean: 0.5 means "discounts but never gates"; 0.0 means
+    "a zero here gates the whole pathway to 0" (use only for genuine
+    dealbreakers, e.g. a catastrophic intermediate)."""
+
+    name: str = "criterion"
+    floor: float = 0.5
+
+    @abstractmethod
+    def score(self, pathways: list) -> list:
+        ...
+
+
+class DoranetScoreCriterion(PathwayCriterion):
+    """DORAnet's WHOLE composite score as a single criterion, min-max
+    normalized across the batch to [0, 1] (higher = better).
+
+    This is the seam that keeps DORAnet's well-tuned, weight-adjustable
+    score intact: its internal component weights are set upstream (in
+    generate_base_rankings); here we just take the resulting final_score
+    and rescale it so it can be blended with the custom [0,1] criteria.
+    """
+
+    name = "doranet"
+
+    def score(self, pathways: list) -> list:
+        vals = [
+            (p.final_score if p.final_score is not None else 0.0)
+            for p in pathways
+        ]
+        if not vals:
+            return []
+        lo, hi = min(vals), max(vals)
+        if hi == lo:
+            # All pathways scored identically — no discrimination here.
+            return [1.0 for _ in vals]
+        return [(v - lo) / (hi - lo) for v in vals]
+
+
+class IntermediateStabilityCriterion(PathwayCriterion):
+    """Penalize pathways whose INTERMEDIATES carry structural features
+    that make them unstable / unsafe / hard to isolate at the bench.
+
+    Hazard tiers (derivable from SMILES alone, no extra data needed):
+      TIER A — catastrophic, one match zeroes the intermediate:
+        peroxide, organic azide, diazo, diazonium, gem-dinitro.
+      TIER B — major (0.3 each): acyl halide, radical center, MW > 800.
+      TIER C — minor (0.1 each): net formal charge, 3-membered ring,
+        gem-diol, 500 < MW <= 800, nitro group.
+
+    Per-intermediate score:  max(0, 1 - 1.0*A - 0.3*B - 0.1*C)
+    Per-pathway score:       MIN over intermediates (weakest-link).
+
+    Absolute, NOT batch-normalized: 0.7 means "70% viable" on its own.
+    `excluded_smiles` (starter, target, helpers) are skipped.
+    """
+
+    name = "stability"
+    floor = 0.0   # a catastrophic intermediate (score 0) GATES the pathway
+
+    _TIER_A_SMARTS = {
+        "peroxide":     "[OX2]-[OX2]",
+        "azide_a":      "[N-]=[N+]=N",
+        "azide_b":      "N=[N+]=[N-]",
+        "diazo":        "[CX3]=[N+]=[N-]",
+        "diazonium":    "[#6][NX1]#[NX2+]",
+        "gem_dinitro":  "[CX4]([NX3](=O)=O)[NX3](=O)=O",
+    }
+    _TIER_B_SMARTS = {
+        "acyl_halide":  "[CX3](=O)[F,Cl,Br,I]",
+    }
+    _TIER_C_SMARTS = {
+        "gem_diol":     "[CX4]([OX2H])[OX2H]",
+        "nitro":        "[NX3](=O)=O",
+    }
+    _MW_TIER_B = 800.0
+    _MW_TIER_C = 500.0
+
+    def __init__(self, excluded_smiles=None):
+        self._excluded = {
+            c for s in (excluded_smiles or [])
+            if (c := self._canonical(s)) is not None
+        }
+        self._compiled_a = {n: Chem.MolFromSmarts(s) for n, s in self._TIER_A_SMARTS.items()}
+        self._compiled_b = {n: Chem.MolFromSmarts(s) for n, s in self._TIER_B_SMARTS.items()}
+        self._compiled_c = {n: Chem.MolFromSmarts(s) for n, s in self._TIER_C_SMARTS.items()}
+        self._score_cache: dict = {}
+
+    @staticmethod
+    def _canonical(smiles):
+        mol = Chem.MolFromSmiles(smiles)
+        return Chem.MolToSmiles(mol) if mol is not None else None
+
+    def _intermediates_in(self, p) -> set:
+        """Unique molecules across the pathway's reactions, minus excluded.
+        RankedPathway stores each step as 'reactants>>products'."""
+        seen: set = set()
+        for rxn in p.reaction_smiles:
+            lhs, _, rhs = rxn.partition(">>")
+            for s in lhs.split(".") + rhs.split("."):
+                s = s.strip()
+                if s and s not in self._excluded:
+                    seen.add(s)
+        return seen
+
+    def _score_intermediate(self, smiles: str) -> float:
+        cached = self._score_cache.get(smiles)
+        if cached is not None:
+            return cached
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            self._score_cache[smiles] = 0.0
+            return 0.0
+        tier_a = sum(len(mol.GetSubstructMatches(pat)) for pat in self._compiled_a.values())
+        tier_b = sum(len(mol.GetSubstructMatches(pat)) for pat in self._compiled_b.values())
+        tier_c = sum(len(mol.GetSubstructMatches(pat)) for pat in self._compiled_c.values())
+        tier_b += sum(a.GetNumRadicalElectrons() for a in mol.GetAtoms())
+        if Chem.GetFormalCharge(mol) != 0:
+            tier_c += 1
+        mw = Descriptors.MolWt(mol)
+        if mw > self._MW_TIER_B:
+            tier_b += 1
+        elif mw > self._MW_TIER_C:
+            tier_c += 1
+        tier_c += sum(1 for r in mol.GetRingInfo().AtomRings() if len(r) == 3)
+        s = max(0.0, 1.0 - 1.0 * tier_a - 0.3 * tier_b - 0.1 * tier_c)
+        self._score_cache[smiles] = s
+        return s
+
+    def score(self, pathways: list) -> list:
+        out = []
+        for p in pathways:
+            inters = self._intermediates_in(p)
+            out.append(min((self._score_intermediate(s) for s in inters), default=1.0))
+        return out
+
+
+class ProcedureDiversityCriterion(PathwayCriterion):
+    """Penalize routes that need many DISTINCT procedures (operator
+    names). Each distinct procedure needs its own condition development,
+    safety review, and analytical method, so a route repeating one
+    reaction is cheaper to scale than one using N different reactions at
+    the same step count.
+
+        s = 1 - (distinct_names - 1) / max(1, total_steps - 1)
+
+    All-same procedure → 1.0; all-different → 0.0; single step → 1.0.
+    Absolute, not batch-normalized.
+    """
+
+    name = "diversity"
+
+    def score(self, pathways: list) -> list:
+        out = []
+        for p in pathways:
+            n = p.num_steps
+            if n <= 1:
+                out.append(1.0)
+                continue
+            distinct = len(set(p.reaction_names))
+            out.append(1.0 - (distinct - 1) / (n - 1))
+        return out
+
+
+# Tier-2 (layer) default weights: DORAnet's chemistry score vs. the
+# Lemnisca process-viability score. DORAnet counts double by default.
+LAYER_DEFAULT_WEIGHTS = {
+    "doranet":  2.0,
+    "lemnisca": 1.0,
+}
+# Tier-1 (component) default weights inside the Lemnisca sub-score.
+LEMNISCA_DEFAULT_WEIGHTS = {
+    "stability": 1.0,
+    "diversity": 1.0,
+}
+
+
+def _floored(x: float, floor: float) -> float:
+    """Remap a raw [0,1] grade into [floor, 1] linearly. floor=0 leaves
+    it unchanged (so a 0 survives and can gate); floor=0.5 lifts the worst
+    case to 0.5 so the criterion discounts but never gates."""
+    return floor + (1.0 - floor) * x
+
+
+def _weighted_geomean(pairs: list) -> Optional[float]:
+    """Weighted geometric mean of (value, weight) pairs:
+        (∏ vᵢ^wᵢ)^(1/Σwᵢ)
+    Any value == 0 with weight > 0 makes the whole result 0 (the gate).
+    Returns None if no pair has positive weight."""
+    active = [(v, w) for v, w in pairs if w > 0]
+    if not active:
+        return None
+    if any(v <= 0.0 for v, _ in active):
+        return 0.0
+    wsum = sum(w for _, w in active)
+    log_sum = sum(w * math.log(v) for v, w in active)
+    return math.exp(log_sum / wsum)
+
+
+def apply_lemnisca_blend(
+    ranked_pathways: list,
+    layer_weights: Optional[dict] = None,
+    lemnisca_weights: Optional[dict] = None,
+    excluded_smiles=None,
+) -> list:
+    """
+    Two-tier weighted GEOMETRIC-mean blend, then re-sort + re-rank.
+
+    Tier 1 — Lemnisca sub-score: geometric mean of the custom criteria,
+        each remapped into [floor, 1]. Stability (floor 0) can drive the
+        sub-score to 0 → the gate; diversity (floor 0.5) only discounts.
+
+            lemnisca = ( ∏ floored(cᵢ)^wᵢ )^(1/Σwᵢ)      (lemnisca_weights)
+
+    Tier 2 — final blended score: geometric mean of DORAnet (remapped
+        into [0.5, 1] so it never gates) and the Lemnisca sub-score
+        (NOT floored, so a stability gate of 0 propagates through):
+
+            blended = ( doranet^a · lemnisca^b )^(1/(a+b))   (layer_weights)
+
+    Stores raw 0–1 grades on `lemnisca_components` (incl. "doranet"), the
+    sub-score on `lemnisca_score`, and the ranking key on `blended_score`.
+    `excluded_smiles` (starter, target, helpers) skip stability scoring.
+    """
+    if not ranked_pathways:
+        return ranked_pathways
+    layer_weights = layer_weights or LAYER_DEFAULT_WEIGHTS
+    lemnisca_weights = lemnisca_weights or LEMNISCA_DEFAULT_WEIGHTS
+
+    doranet_c = DoranetScoreCriterion()
+    lem_criteria = [
+        IntermediateStabilityCriterion(excluded_smiles),
+        ProcedureDiversityCriterion(),
+    ]
+    doranet_grades = doranet_c.score(ranked_pathways)
+    lem_grades = {c.name: c.score(ranked_pathways) for c in lem_criteria}
+
+    for i, p in enumerate(ranked_pathways):
+        comps: dict = {}
+        # --- Tier 1: Lemnisca sub-score ---
+        lem_pairs = []
+        for c in lem_criteria:
+            raw = lem_grades[c.name][i]
+            comps[c.name] = raw
+            w = float(lemnisca_weights.get(c.name, 0.0))
+            lem_pairs.append((_floored(raw, c.floor), w))
+        lemnisca_sub = _weighted_geomean(lem_pairs)
+        if lemnisca_sub is None:        # no lemnisca weights → neutral
+            lemnisca_sub = 1.0
+
+        # --- Tier 2: final blend ---
+        dora_raw = doranet_grades[i]
+        comps["doranet"] = dora_raw
+        final_pairs = [
+            (_floored(dora_raw, doranet_c.floor),
+             float(layer_weights.get("doranet", 0.0))),
+            (lemnisca_sub,              # NOT floored: lets the gate through
+             float(layer_weights.get("lemnisca", 0.0))),
+        ]
+        blended = _weighted_geomean(final_pairs)
+        if blended is None:            # both layer weights 0 → fall back
+            blended = _floored(dora_raw, doranet_c.floor)
+
+        p.lemnisca_score = lemnisca_sub
+        p.blended_score = blended
+        p.lemnisca_components = comps
+
+    reordered = sorted(
+        ranked_pathways,
+        key=lambda p: (p.blended_score if p.blended_score is not None else 0.0),
+        reverse=True,
+    )
+    for new_rank, p in enumerate(reordered, 1):
+        p.rank = new_rank
+    return reordered

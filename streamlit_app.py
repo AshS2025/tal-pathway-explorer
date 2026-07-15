@@ -52,7 +52,12 @@ from pipeline import (
 
 # UI still needs these directly for display (not the pipeline itself)
 from pathway_tools import parse_reaction_string           # for the rare fallback branch
-from pathway_scoring import RankedPathway, DEFAULT_WEIGHTS  # type hints + weight defaults
+from pathway_scoring import (
+    RankedPathway,             # type hints in display
+    DEFAULT_WEIGHTS,           # tier-0: DORAnet internal component weights
+    LAYER_DEFAULT_WEIGHTS,     # tier-2: DORAnet vs Lemnisca layer weights
+    LEMNISCA_DEFAULT_WEIGHTS,  # tier-1: Lemnisca component weights
+)
 from visualize_pathways import visualize_pathways         # for the Graph tab
 
 # Built-in chem whitelist — used only to pre-fill the editable textarea.
@@ -280,6 +285,19 @@ with st.sidebar:
                 ),
             )
 
+    with st.expander("🧴  Helper molecules", expanded=False):
+        helpers_text = st.text_area(
+            "One helper SMILES per line",
+            value="O\n[H][H]",
+            height=90,
+            help=(
+                "Freely-available co-reactants that don't count as pathway "
+                "steps — e.g. water `O`, hydrogen `[H][H]`, CO2 `O=C=O`. "
+                "Edit to match your chemistry. Leave blank to use water + "
+                "H2. (For bio runs, malonyl-CoA is added automatically.)"
+            ),
+        )
+
     with st.expander("🎯  Search strategy", expanded=False):
         strategy = st.radio(
             "Strategy",
@@ -446,6 +464,15 @@ def _parse_whitelist_text(text):
     return names or None
 
 
+def _parse_smiles_lines(text):
+    """Parse a textarea of SMILES (one per line) into a list. Blank lines
+    are ignored. Unlike _parse_whitelist_text this does NOT treat '#' as a
+    comment — '#' is a valid SMILES triple-bond token (e.g. C#C, N#N)."""
+    if not text:
+        return []
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
 def _fmt_dh(dh):
     return f"{dh:+.1f}" if dh is not None else "—"
 
@@ -483,6 +510,7 @@ def _render_step_details(p):
 if run_button:
     bio_whitelist_lines = _parse_whitelist_text(bio_whitelist_text) if include_bio else None
     chem_whitelist_lines = _parse_whitelist_text(chem_whitelist_text) if include_chem else None
+    helpers_list = _parse_smiles_lines(helpers_text) or ["O", "[H][H]"]
 
     config = PipelineConfig(
         starter_smiles=starter_smiles,
@@ -497,6 +525,7 @@ if run_button:
         max_atoms_o=int(max_o),
         max_atoms_n=int(max_n),
         max_rxn_dh=float(max_dh),
+        helpers=helpers_list,
         bio_whitelist=bio_whitelist_lines,
         chem_whitelist=chem_whitelist_lines,
         enable_rmg=bool(thermo_enabled),
@@ -586,30 +615,68 @@ st.success(
     "and click **Rank pathways** below to score them."
 )
 
-# ---- Ranking controls: criterion weights + Rank button ----
+# ---- Ranking controls: 3 tiers of weights + Rank button ----
 with st.container(border=True):
     st.markdown("#### 🏆  Ranking")
     st.caption(
-        "DORAnet composite score. Set the criterion weights, then rank. "
-        "Ranking is slower than generation (can take a few minutes)."
+        "Final score = a weighted **geometric mean** blending DORAnet's "
+        "chemistry score with the Lemnisca process-viability score. Set "
+        "how much each matters below. Ranking is slower than generation "
+        "(can take a few minutes)."
     )
-    wc1, wc2, wc3, wc4 = st.columns(4)
-    with wc1:
-        w_steps = st.number_input(
-            "Steps", 0, 10, int(DEFAULT_WEIGHTS["number_of_steps"]),
-            help="Weight on step count (higher = prefer shorter routes).")
-    with wc2:
-        w_thermo = st.number_input(
-            "Thermo", 0, 10, int(DEFAULT_WEIGHTS["reaction_thermo"]),
-            help="Weight on worst-step enthalpy (ΔH).")
-    with wc3:
-        w_byprod = st.number_input(
-            "By-products", 0, 10, int(DEFAULT_WEIGHTS["by_product_number"]),
-            help="Weight penalising by-product count.")
-    with wc4:
-        w_atom = st.number_input(
-            "Atom economy", 0, 10, int(DEFAULT_WEIGHTS["atom_economy"]),
-            help="Weight rewarding atom economy.")
+
+    # Tier 2 — the top blend: chemistry vs. process-viability
+    st.markdown("**Layer blend** — chemistry vs. process-viability")
+    lc1, lc2 = st.columns(2)
+    with lc1:
+        l_doranet = st.number_input(
+            "DORAnet (chemistry)", 0, 10, int(LAYER_DEFAULT_WEIGHTS["doranet"]),
+            help="How much DORAnet's overall chemistry score (steps, thermo, "
+                 "atom economy, by-products) counts in the final blend.")
+    with lc2:
+        l_lemnisca = st.number_input(
+            "Lemnisca (viability)", 0, 10, int(LAYER_DEFAULT_WEIGHTS["lemnisca"]),
+            help="How much the process-viability score (stability, diversity) "
+                 "counts in the final blend.")
+
+    # Tier 1 — inside the Lemnisca viability score
+    st.markdown("**Lemnisca components** — inside the viability score")
+    mc1, mc2 = st.columns(2)
+    with mc1:
+        m_stability = st.number_input(
+            "Stability", 0, 10, int(LEMNISCA_DEFAULT_WEIGHTS["stability"]),
+            help="Reward stable / isolable intermediates. A catastrophic "
+                 "intermediate (peroxide, azide, …) GATES the route to 0.")
+    with mc2:
+        m_diversity = st.number_input(
+            "Diversity", 0, 10, int(LEMNISCA_DEFAULT_WEIGHTS["diversity"]),
+            help="Reward routes that reuse the same procedure (cheaper to "
+                 "develop). Discounts high-diversity routes, never gates.")
+
+    # Tier 0 — DORAnet's own internals (advanced)
+    with st.expander("⚙️  Advanced: DORAnet internal weights", expanded=False):
+        st.caption(
+            "These shape DORAnet's *own* composite score before it enters "
+            "the blend above. Most users can leave these at defaults."
+        )
+        wc1, wc2, wc3, wc4 = st.columns(4)
+        with wc1:
+            w_steps = st.number_input(
+                "Steps", 0, 10, int(DEFAULT_WEIGHTS["number_of_steps"]),
+                help="Weight on step count (higher = prefer shorter routes).")
+        with wc2:
+            w_thermo = st.number_input(
+                "Thermo", 0, 10, int(DEFAULT_WEIGHTS["reaction_thermo"]),
+                help="Weight on worst-step enthalpy (ΔH).")
+        with wc3:
+            w_byprod = st.number_input(
+                "By-products", 0, 10, int(DEFAULT_WEIGHTS["by_product_number"]),
+                help="Weight penalising by-product count.")
+        with wc4:
+            w_atom = st.number_input(
+                "Atom economy", 0, 10, int(DEFAULT_WEIGHTS["atom_economy"]),
+                help="Weight rewarding atom economy.")
+
     rank_button = st.button(
         "🏆  Rank pathways", type="primary", use_container_width=True)
 
@@ -621,6 +688,11 @@ if rank_button:
         "by_product_number": int(w_byprod),
         "atom_economy":      int(w_atom),
     })
+    layer_weights = {"doranet": int(l_doranet), "lemnisca": int(l_lemnisca)}
+    lemnisca_weights = {
+        "stability": int(m_stability),
+        "diversity": int(m_diversity),
+    }
     _rank_thermo = _get_rmg_client() if config.enable_rmg else None
     _eq_client = None
     if config.enable_equilibrator:
@@ -633,7 +705,8 @@ if rank_button:
         "minutes (single-threaded on Windows)…"
     ):
         st.session_state["rank_result"] = rank_pathways(
-            config, weights=weights,
+            config, weights=weights, layer_weights=layer_weights,
+            lemnisca_weights=lemnisca_weights,
             thermo_calc=_rank_thermo, equilibrator_client=_eq_client,
         )
 
@@ -665,17 +738,29 @@ tab_pathways, tab_graph = st.tabs(["📋 Pathways", "🕸️ Graph"])
 with tab_pathways:
     if is_ranked:
         st.caption(
-            "Ranked by DORAnet's composite score (steps, thermo, atom "
-            "economy, by-products). Higher = better trade-off."
+            "Ranked by the **final blended score** = weighted geometric mean "
+            "of DORAnet's chemistry score and the Lemnisca viability score "
+            "(stability ⊗ diversity). All grades are 0–1, higher = better; a "
+            "catastrophic intermediate gates a route to 0."
         )
+
+        def _comp(p, key):
+            v = p.lemnisca_components.get(key)
+            return round(v, 2) if v is not None else "—"
+
+        def _fnum(x):
+            return round(x, 2) if x is not None else "—"
+
         summary_rows = [
             {
                 "Rank": p.rank,
-                "Score": round(p.final_score, 2),
+                "Final": _fnum(p.blended_score),
+                "DORAnet": _comp(p, "doranet"),
+                "Lemnisca": _fnum(p.lemnisca_score),
+                "Stability": _comp(p, "stability"),
+                "Diversity": _comp(p, "diversity"),
                 "Steps": p.num_steps,
                 "Max ΔH (kJ/mol)": _fmt_dh(p.max_dh),
-                "Max ΔG'° (kJ/mol)": _fmt_dh(p.equilibrator_max_dg),
-                "ΔG'° coverage": _fmt_cov(p.equilibrator_coverage),
                 "Atom econ.": round(p.atomic_economy, 2),
                 "Byproducts": p.pathway_byproduct_count,
             }
@@ -685,9 +770,9 @@ with tab_pathways:
 
         st.markdown("### Details per pathway")
         for p in display_pathways:
+            _fin = _fnum(p.blended_score)
             with st.expander(
-                f"Rank {p.rank} — score {p.final_score:.2f} — "
-                f"{p.num_steps} step(s)",
+                f"Rank {p.rank} — final {_fin} — {p.num_steps} step(s)",
                 expanded=(p is display_pathways[0]),
             ):
                 max_dh_str = _fmt_dh(p.max_dh)
@@ -695,6 +780,11 @@ with tab_pathways:
                 max_dg_str = _fmt_dh(p.equilibrator_max_dg)
                 avg_dg_str = _fmt_dh(p.equilibrator_avg_dg)
                 st.markdown(
+                    f"**Final:** {_fin} = geomean( DORAnet "
+                    f"{_comp(p, 'doranet')}, Lemnisca {_fnum(p.lemnisca_score)} "
+                    f"[stability {_comp(p, 'stability')} · "
+                    f"diversity {_comp(p, 'diversity')}] )  \n"
+                    f"**DORAnet raw score:** {p.final_score:.2f}  •  "
                     f"**Atom economy:** {p.atomic_economy:.2f}  •  "
                     f"**Byproducts:** {p.pathway_byproduct_count}  \n"
                     f"**ΔH** (RMG): max {max_dh_str}, avg {avg_dh_str} kJ/mol  •  "
@@ -743,7 +833,7 @@ with tab_graph:
                 target_smiles=graph_target,
                 starter_label="starter",
                 target_label="target",
-                helpers=["O", "[H][H]"],
+                helpers=config.helpers,
                 pathway_filter="all",
             )
         with open(graph_path, "r", encoding="utf-8") as f:

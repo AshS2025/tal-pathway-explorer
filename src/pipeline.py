@@ -44,6 +44,7 @@ from network_generation import generate_network_tal
 from pathway_tools import load_pathways_from_file, parse_reaction_string
 from pathway_scoring import (
     RankedPathway, generate_base_rankings, decorate_with_equilibrator,
+    apply_lemnisca_blend,
 )
 from recipe_rankers import (
     FeedstockProximityRanker, ForwardProductTanimotoRanker,
@@ -111,6 +112,11 @@ class PipelineConfig:
     max_atoms_o: int = 5
     max_atoms_n: int = 2
     max_rxn_dh: float = 15.0
+    # helper molecules — freely-available co-reactants (water, H2, ...)
+    # that don't count as pathway steps. User-editable (no longer
+    # hardcoded). For bio runs, malonyl-CoA is auto-added on top of these
+    # (it's a required polyketide co-substrate, not a general helper).
+    helpers: List[str] = field(default_factory=lambda: ["O", "[H][H]"])
     # operator whitelists — if None, each falls back to its built-in TAL
     # default inside network_generation. When supplied (e.g. from a UI
     # upload), the list FULLY REPLACES the default.
@@ -223,6 +229,9 @@ def validate_config(config: PipelineConfig) -> Optional[str]:
         )
     if config.generations < 1 or config.generations > 8:
         return "Generations per side must be between 1 and 8."
+    for h in config.helpers:
+        if Chem.MolFromSmiles(h) is None:
+            return f"Invalid helper molecule SMILES: `{h}`"
     return None
 
 
@@ -293,6 +302,7 @@ def run_pipeline(
             include_chem=config.include_chem,
             include_bio=config.include_bio,
             directions=config.directions,
+            base_helpers=config.helpers,
             bio_whitelist=config.bio_whitelist,
             chem_whitelist=config.chem_whitelist,
             thermo_calc=effective_thermo,
@@ -342,6 +352,8 @@ def rank_pathways(
     config: PipelineConfig,
     *,
     weights: Optional[dict] = None,
+    layer_weights: Optional[dict] = None,
+    lemnisca_weights: Optional[dict] = None,
     thermo_calc: Optional[Callable[[str], Optional[float]]] = None,
     equilibrator_client: Optional[Any] = None,
 ) -> PipelineResult:
@@ -380,7 +392,7 @@ def rank_pathways(
         ranked = generate_base_rankings(
             starter=starter,
             target=target,
-            helpers=["O", "[H][H]"],
+            helpers=list(config.helpers),
             job_name=config.job_name,
             weights=weights,
             molecule_thermo_calculator=effective_thermo,
@@ -409,6 +421,19 @@ def rank_pathways(
         )
         n_pruned = n_before_eq - len(ranked)
 
+    # ---- Lemnisca blend ----
+    # Layer the custom criteria on top of DORAnet's composite (which is
+    # treated as one ingredient inside the blend) and re-order. Feedstocks
+    # (starter, target, helpers, malonyl-CoA) are excluded from the
+    # intermediate-stability scoring since they aren't intermediates.
+    excluded = {starter, target, *config.helpers, MALONYL_COA}
+    ranked = apply_lemnisca_blend(
+        ranked,
+        layer_weights=layer_weights,
+        lemnisca_weights=lemnisca_weights,
+        excluded_smiles=excluded,
+    )
+
     return PipelineResult(
         ok=True,
         error=None,
@@ -419,6 +444,7 @@ def rank_pathways(
         diagnostics={
             "ranked": True,
             "equilibrator_pruned": n_pruned,
+            "blended": True,
         },
     )
 
@@ -475,6 +501,7 @@ def _expand_and_trace(
     include_chem: bool,
     include_bio: bool,
     directions: List[str],
+    base_helpers: List[str],
     bio_whitelist: Optional[List[str]],
     chem_whitelist: Optional[List[str]],
     thermo_calc,
@@ -496,20 +523,19 @@ def _expand_and_trace(
     `starter`, retro always expands back from `target`.
     """
     # Helpers = freely-available co-reactants that don't count as pathway
-    # steps. When bio operators are on, malonyl-CoA MUST be a helper: the
-    # Claisen rules consume it, it's not a DORAnet cofactor, and it's what
+    # steps. `base_helpers` comes from the user (default water + H2). When
+    # bio operators are on, malonyl-CoA MUST be added on top: the Claisen
+    # rules consume it, it's not a DORAnet cofactor, and it's what
     # test_tal_centered_combined.py passed to pretreat/pathway_finder.
-    # Without it, no bio pathway ever connects (pathway_finder rejects any
-    # route that consumes an un-suppliable molecule).
-    helpers = ["O", "[H][H]"]
-    if include_bio:
-        helpers = helpers + [MALONYL_COA]
+    # Without it, no bio pathway ever connects.
+    base_helpers = list(base_helpers)
+    helpers = base_helpers + [MALONYL_COA] if include_bio else base_helpers
 
     starter_file = f"{job_name}_starter.smi"
-    helper_file  = f"{job_name}_helpers.smi"        # chem expansion: O + H2
+    helper_file  = f"{job_name}_helpers.smi"        # chem expansion helpers
     target_file  = f"{job_name}_target.smi"
     _write_smi(starter_file, [starter])
-    _write_smi(helper_file, ["O", "[H][H]"])
+    _write_smi(helper_file, base_helpers)
     _write_smi(target_file, [target])
 
     do_forward = "forward" in directions
