@@ -37,8 +37,6 @@ export default function RankSidebar({ onRank, disabled, busy }: Props) {
   // tier 1 — lemnisca components
   const [wStability, setWStability] = useState(1);
   const [wDiversity, setWDiversity] = useState(1);
-  const [wFeasibility, setWFeasibility] = useState(1);
-  const [enableDora, setEnableDora] = useState(false);
   // tier 0 — DORAnet internals
   const [wSteps, setWSteps] = useState(4);
   const [wThermo, setWThermo] = useState(2);
@@ -46,21 +44,15 @@ export default function RankSidebar({ onRank, disabled, busy }: Props) {
   const [wAtom, setWAtom] = useState(1);
 
   function submit() {
-    const lemnisca: Record<string, number> = {
-      stability: wStability,
-      diversity: wDiversity,
-    };
-    if (enableDora) lemnisca.feasibility = wFeasibility;
     const req: RankRequest = {
       layer_weights: { doranet: wDoranet, lemnisca: wLemnisca },
-      lemnisca_weights: lemnisca,
+      lemnisca_weights: { stability: wStability, diversity: wDiversity },
       weights: {
         number_of_steps: wSteps,
         reaction_thermo: wThermo,
         by_product_number: wByprod,
         atom_economy: wAtom,
       },
-      enable_dora: enableDora,
     };
     onRank(req);
   }
@@ -79,17 +71,6 @@ export default function RankSidebar({ onRank, disabled, busy }: Props) {
           <h4>Lemnisca components</h4>
           <Weight label="Stability" value={wStability} onChange={setWStability} />
           <Weight label="Diversity" value={wDiversity} onChange={setWDiversity} />
-          <label className="weight">
-            <span>Feasibility (DORA-XGB)</span>
-            <input
-              type="checkbox"
-              checked={enableDora}
-              onChange={(e) => setEnableDora(e.target.checked)}
-            />
-          </label>
-          {enableDora && (
-            <Weight label="Feasibility weight" value={wFeasibility} onChange={setWFeasibility} />
-          )}
 
           <details className="advanced">
             <summary>DORAnet internal weights</summary>

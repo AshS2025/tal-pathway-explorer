@@ -32,6 +32,8 @@ export default function InputsForm({ onRun, busy }: Props) {
   const [helpers, setHelpers] = useState("O\n[H][H]");
   const [chemWhitelist, setChemWhitelist] = useState("");
   const [bioWhitelist, setBioWhitelist] = useState("");
+  const [enableDora, setEnableDora] = useState(false);
+  const [feasThreshold, setFeasThreshold] = useState(0.5);
 
   const includeChem = domain === "chem" || domain === "both";
   const includeBio = domain === "bio" || domain === "both";
@@ -53,6 +55,8 @@ export default function InputsForm({ onRun, busy }: Props) {
       helpers: lines(helpers).length ? lines(helpers) : ["O", "[H][H]"],
       chem_whitelist: includeChem && chemWhitelist.trim() ? lines(chemWhitelist) : null,
       bio_whitelist: includeBio && bioWhitelist.trim() ? lines(bioWhitelist) : null,
+      enable_dora: enableDora,
+      feasibility_prune_threshold: feasThreshold,
     };
     onRun(req);
   }
@@ -165,6 +169,28 @@ export default function InputsForm({ onRun, busy }: Props) {
               value={bioWhitelist}
               onChange={(e) => setBioWhitelist(e.target.value)}
               placeholder="rule1118&#10;rule0087&#10;rule0891"
+            />
+          </label>
+        )}
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={enableDora}
+            onChange={(e) => setEnableDora(e.target.checked)}
+          />
+          Prune infeasible bio pathways with DORA-XGB
+        </label>
+        {enableDora && (
+          <label>
+            Feasibility threshold — drop pathways with any bio step below this (0–1)
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={feasThreshold}
+              onChange={(e) => setFeasThreshold(Number(e.target.value))}
             />
           </label>
         )}

@@ -20,13 +20,15 @@ export interface GenerateRequest {
   helpers?: string[];
   bio_whitelist?: string[] | null;
   chem_whitelist?: string[] | null;
+  // DORA-XGB feasibility prune (bio only), applied during generation
+  enable_dora?: boolean;
+  feasibility_prune_threshold?: number;
 }
 
 export interface RankRequest {
   weights?: Record<string, number> | null; // tier-0 DORAnet internals
   layer_weights?: Record<string, number> | null; // tier-2 DORAnet vs Lemnisca
-  lemnisca_weights?: Record<string, number> | null; // tier-1 stability/diversity/feasibility
-  enable_dora?: boolean; // spawn the DORA-XGB feasibility model (bio only)
+  lemnisca_weights?: Record<string, number> | null; // tier-1 stability/diversity
 }
 
 // ---- response shapes (mirror RankedPathway / Run.to_dict) ----

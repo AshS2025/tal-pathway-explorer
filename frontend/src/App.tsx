@@ -113,6 +113,12 @@ export default function App() {
               {status === "ranking" && (
                 <p className="muted">Ranking in progress… (showing unranked meanwhile)</p>
               )}
+              {Number(run.diagnostics?.feasibility_pruned) > 0 && (
+                <p className="muted">
+                  DORA-XGB pruned {String(run.diagnostics.feasibility_pruned)} infeasible
+                  bio pathway(s) during generation.
+                </p>
+              )}
               {(status === "generated" || status === "ranking" || status === "ranked") && (
                 <PathwaysView pathways={pathways} ranked={isRanked} />
               )}

@@ -58,7 +58,6 @@ export default function PathwaysView({ pathways, ranked }: Props) {
                 <th>Lemnisca</th>
                 <th>Stability</th>
                 <th>Diversity</th>
-                <th>Feasibility</th>
                 <th>Steps</th>
               </tr>
             </thead>
@@ -71,7 +70,6 @@ export default function PathwaysView({ pathways, ranked }: Props) {
                   <td>{fmt(p.lemnisca_score)}</td>
                   <td>{comp(p, "stability")}</td>
                   <td>{comp(p, "diversity")}</td>
-                  <td>{comp(p, "feasibility")}</td>
                   <td>{p.reaction_smiles.length}</td>
                 </tr>
               ))}

@@ -44,7 +44,7 @@ from network_generation import generate_network_tal
 from pathway_tools import load_pathways_from_file, parse_reaction_string
 from pathway_scoring import (
     RankedPathway, generate_base_rankings, decorate_with_equilibrator,
-    apply_lemnisca_blend,
+    apply_lemnisca_blend, FeasibilityCriterion,
 )
 from recipe_rankers import (
     FeedstockProximityRanker, ForwardProductTanimotoRanker,
@@ -128,6 +128,10 @@ class PipelineConfig:
     # equilibrator post-hoc pruning threshold (kJ/mol); pathways with
     # any bio step |ΔG'°| exceeding this get dropped
     equilibrator_prune_max_abs_dg: float = 100.0
+    # DORA-XGB feasibility prune (generation phase): drop any pathway whose
+    # weakest BIO step has feasibility below this threshold. None = no prune.
+    # Only applied when a dora_client is passed to run_pipeline.
+    feasibility_prune_threshold: Optional[float] = None
     # file prefix for temp artefacts written to disk during a run
     job_name: str = "pipeline_job"
 
@@ -242,6 +246,7 @@ def run_pipeline(
     config: PipelineConfig,
     *,
     thermo_calc: Optional[Callable[[str], Optional[float]]] = None,
+    dora_client: Optional[Any] = None,
 ) -> PipelineResult:
     """
     GENERATION phase: expand → merge → trace → parse. Returns the found
@@ -333,6 +338,21 @@ def run_pipeline(
     # is a separate step. Return the raw pathways sorted by step count so
     # the UI can display them instantly.
     pathways = _parse_unranked_pathways(config.job_name)
+
+    # ---- DORA-XGB feasibility prune (generation phase) ----
+    # Drop pathways whose weakest BIO step is below the feasibility
+    # threshold, BEFORE the (slow) ranking step ever sees them. Chem-only
+    # pathways score 1.0 (no bio step) so they're never pruned here.
+    n_feas_pruned = 0
+    if dora_client is not None and config.feasibility_prune_threshold is not None:
+        thr = float(config.feasibility_prune_threshold)
+        scores = FeasibilityCriterion(dora_client).score(pathways)
+        kept = [p for p, s in zip(pathways, scores) if s >= thr]
+        n_feas_pruned = len(pathways) - len(kept)
+        pathways = kept
+        for i, p in enumerate(pathways, 1):   # re-number after pruning
+            p.rank = i
+
     return PipelineResult(
         ok=True,
         error=None,
@@ -344,6 +364,7 @@ def run_pipeline(
             "ranked": False,
             "domain": config.domain,
             "directions": config.directions,
+            "feasibility_pruned": n_feas_pruned,
         },
     )
 
@@ -356,7 +377,6 @@ def rank_pathways(
     lemnisca_weights: Optional[dict] = None,
     thermo_calc: Optional[Callable[[str], Optional[float]]] = None,
     equilibrator_client: Optional[Any] = None,
-    dora_client: Optional[Any] = None,
 ) -> PipelineResult:
     """
     RANKING phase: run DORAnet's pathway_ranking (with adjustable
@@ -433,7 +453,6 @@ def rank_pathways(
         layer_weights=layer_weights,
         lemnisca_weights=lemnisca_weights,
         excluded_smiles=excluded,
-        dora_client=dora_client,
     )
 
     return PipelineResult(

@@ -132,6 +132,8 @@ def start_run(req: GenerateRequest):
     config = PipelineConfig.from_dict(
         {**req.model_dump(), "job_name": f"api_{run.id}"}
     )
+    if not req.enable_dora:
+        config.feasibility_prune_threshold = None   # prune off unless enabled
     err = validate_config(config)
     if err:
         raise HTTPException(status_code=422, detail=err)
@@ -140,7 +142,13 @@ def start_run(req: GenerateRequest):
 
     def _worker(r: jobs.Run) -> None:
         cleanup_job_files(config.job_name)
-        result = run_pipeline(config)
+        dora = None
+        if req.enable_dora:
+            try:
+                dora = _get_dora_client()
+            except Exception as e:  # env missing → generate without the prune
+                print(f"DORA-XGB unavailable, generating without feasibility prune: {e}")
+        result = run_pipeline(config, dora_client=dora)
         if not result.ok:
             r.status, r.error = "error", result.error
             return
@@ -212,18 +220,11 @@ def start_rank(run_id: str, req: RankRequest):
     jobs.set_status(run, "ranking")
 
     def _worker(r: jobs.Run) -> None:
-        dora = None
-        if req.enable_dora:
-            try:
-                dora = _get_dora_client()
-            except Exception as e:      # env missing / spawn failed → skip it
-                print(f"DORA-XGB unavailable, ranking without it: {e}")
         result = rank_pathways(
             config,
             weights=req.weights,
             layer_weights=req.layer_weights,
             lemnisca_weights=req.lemnisca_weights,
-            dora_client=dora,
         )
         if not result.ok:
             r.status, r.error = "error", result.error

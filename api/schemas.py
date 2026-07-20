@@ -33,6 +33,10 @@ class GenerateRequest(BaseModel):
     enable_rmg: bool = False
     enable_equilibrator: bool = False
     equilibrator_prune_max_abs_dg: float = 100.0
+    # DORA-XGB feasibility prune (bio only): drop pathways whose weakest
+    # bio step is below this feasibility. Only applied when enable_dora.
+    enable_dora: bool = False
+    feasibility_prune_threshold: float = 0.5
 
 
 class RankRequest(BaseModel):
@@ -40,8 +44,4 @@ class RankRequest(BaseModel):
     dict is optional; omitted → the pipeline's built-in defaults."""
     weights: Optional[dict] = None            # tier-0: DORAnet internals
     layer_weights: Optional[dict] = None      # tier-2: DORAnet vs Lemnisca
-    lemnisca_weights: Optional[dict] = None   # tier-1: stability, diversity, feasibility
-    # Spawn the DORA-XGB feasibility model (separate env) and include it as
-    # a Lemnisca criterion. Off by default — the model takes a few seconds
-    # to load and only matters for bio pathways.
-    enable_dora: bool = False
+    lemnisca_weights: Optional[dict] = None   # tier-1: stability, diversity

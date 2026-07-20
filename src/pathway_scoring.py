@@ -555,11 +555,11 @@ LAYER_DEFAULT_WEIGHTS = {
     "lemnisca": 1.0,
 }
 # Tier-1 (component) default weights inside the Lemnisca sub-score.
-# `feasibility` is only used when a DORA-XGB client is supplied.
+# (DORA-XGB feasibility is applied as a generation-phase PRUNE, not a
+# ranking component — see run_pipeline's feasibility_prune_threshold.)
 LEMNISCA_DEFAULT_WEIGHTS = {
     "stability": 1.0,
     "diversity": 1.0,
-    "feasibility": 1.0,
 }
 
 
@@ -590,7 +590,6 @@ def apply_lemnisca_blend(
     layer_weights: Optional[dict] = None,
     lemnisca_weights: Optional[dict] = None,
     excluded_smiles=None,
-    dora_client=None,
 ) -> list:
     """
     Two-tier weighted GEOMETRIC-mean blend, then re-sort + re-rank.
@@ -621,8 +620,6 @@ def apply_lemnisca_blend(
         IntermediateStabilityCriterion(excluded_smiles),
         ProcedureDiversityCriterion(),
     ]
-    if dora_client is not None:
-        lem_criteria.append(FeasibilityCriterion(dora_client))
     doranet_grades = doranet_c.score(ranked_pathways)
     lem_grades = {c.name: c.score(ranked_pathways) for c in lem_criteria}
 
