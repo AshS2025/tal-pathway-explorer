@@ -13,6 +13,8 @@ __pycache__/
 
 # Pathway visualization outputs (HTML, vendored JS, rendered molecule PNGs)
 *_graph.html
+*_graph_all.html
+*_graph_top5.html
 pathway_images/
 lib/
 

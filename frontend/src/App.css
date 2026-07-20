@@ -1,0 +1,217 @@
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ---- sidebar (ranking weights) ---- */
+.sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  padding: 16px;
+}
+.sidebar h2 {
+  margin-top: 0;
+}
+.sidebar h4 {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+.weight {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 13px;
+}
+.weight input {
+  width: 60px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+.sidebar .primary {
+  width: 100%;
+  margin-top: 16px;
+}
+
+/* ---- main area ---- */
+.main {
+  flex: 1;
+  padding: 20px 28px;
+  max-width: 1100px;
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.tabs button {
+  border: none;
+  background: none;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 15px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+}
+.tabs button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- inputs form ---- */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 660px;
+}
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.form input,
+.form select,
+.form textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  color: var(--text);
+  background: #fff;
+}
+.row {
+  display: flex;
+  gap: 12px;
+}
+.row label {
+  flex: 1;
+}
+.advanced {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+.advanced summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 6px;
+  font-size: 15px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+button.primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- pathways ---- */
+.muted {
+  color: var(--muted);
+  font-size: 14px;
+}
+.error {
+  background: #fdecec;
+  color: #b42318;
+  border: 1px solid #f5c2c0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+table.grid {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0 16px;
+  font-size: 14px;
+}
+table.grid th,
+table.grid td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: right;
+}
+table.grid th:first-child,
+table.grid td:first-child,
+table.grid th:last-child,
+table.grid td:last-child {
+  text-align: center;
+}
+table.grid thead {
+  background: var(--panel);
+}
+details {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 6px 0;
+}
+details summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+ol.steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+ol.steps li {
+  margin: 6px 0;
+}
+ol.steps .op {
+  font-weight: 600;
+}
+ol.steps .dh {
+  color: var(--muted);
+  font-size: 12px;
+}
+ol.steps .rxn {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+/* ---- graph ---- */
+.graph-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.graph-toggle button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.graph-toggle button.active {
+  background: var(--accent-weak);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.graph-frame {
+  width: 100%;
+  height: 640px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}

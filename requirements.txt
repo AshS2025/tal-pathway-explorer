@@ -28,3 +28,11 @@ equilibrator-api==0.6.0
 # NOTE: the RMG thermodynamics option is a separate advanced feature that
 # needs its own Python 2.7 environment (rmg_env) and is NOT installed by
 # this file. Leave RMG disabled in the UI unless that env is set up.
+#
+# NOTE: the DORA-XGB feasibility criterion (optional, bio ranking) ALSO
+# needs its own environment — its deps (xgboost 1.6.2, mordred) won't
+# install on Python 3.13. Set it up once with:
+#     conda create -n dora_xgb python=3.9 -y
+#     conda run -n dora_xgb pip install DORA-XGB
+# The main app talks to it via a subprocess bridge (src/dora_xgb_client.py);
+# leave "Feasibility (DORA-XGB)" off in the UI unless that env exists.

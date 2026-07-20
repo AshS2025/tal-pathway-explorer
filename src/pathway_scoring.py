@@ -516,6 +516,38 @@ class ProcedureDiversityCriterion(PathwayCriterion):
         return out
 
 
+class FeasibilityCriterion(PathwayCriterion):
+    """DORA-XGB enzymatic reaction-feasibility.
+
+    DORA-XGB is trained on ENZYMATIC reactions, so it's only meaningful
+    for bio steps — chem steps are treated as feasible (1.0) so they
+    don't get penalised by an out-of-domain prediction. Each bio step is
+    scored 0-1 (higher = more feasible) via the DoraXGBClient; the
+    pathway takes its WEAKEST bio step (like stability's weakest-link).
+
+    Soft (floor 0.5): it's a model prediction, so it discounts rather
+    than hard-gates. Only active when a dora_client is supplied.
+    """
+
+    name = "feasibility"
+    floor = 0.5
+
+    def __init__(self, dora_client):
+        self._client = dora_client
+
+    def score(self, pathways: list) -> list:
+        out = []
+        for p in pathways:
+            vals = []
+            for smi, op_name in zip(p.reaction_smiles, p.reaction_names):
+                if is_bio_op(op_name):
+                    s = self._client.feasibility(smi)
+                    if s is not None:
+                        vals.append(s)
+            out.append(min(vals) if vals else 1.0)  # chem-only → no penalty
+        return out
+
+
 # Tier-2 (layer) default weights: DORAnet's chemistry score vs. the
 # Lemnisca process-viability score. DORAnet counts double by default.
 LAYER_DEFAULT_WEIGHTS = {
@@ -523,9 +555,11 @@ LAYER_DEFAULT_WEIGHTS = {
     "lemnisca": 1.0,
 }
 # Tier-1 (component) default weights inside the Lemnisca sub-score.
+# `feasibility` is only used when a DORA-XGB client is supplied.
 LEMNISCA_DEFAULT_WEIGHTS = {
     "stability": 1.0,
     "diversity": 1.0,
+    "feasibility": 1.0,
 }
 
 
@@ -556,6 +590,7 @@ def apply_lemnisca_blend(
     layer_weights: Optional[dict] = None,
     lemnisca_weights: Optional[dict] = None,
     excluded_smiles=None,
+    dora_client=None,
 ) -> list:
     """
     Two-tier weighted GEOMETRIC-mean blend, then re-sort + re-rank.
@@ -586,6 +621,8 @@ def apply_lemnisca_blend(
         IntermediateStabilityCriterion(excluded_smiles),
         ProcedureDiversityCriterion(),
     ]
+    if dora_client is not None:
+        lem_criteria.append(FeasibilityCriterion(dora_client))
     doranet_grades = doranet_c.score(ranked_pathways)
     lem_grades = {c.name: c.score(ranked_pathways) for c in lem_criteria}
 

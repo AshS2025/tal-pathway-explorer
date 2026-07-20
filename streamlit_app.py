@@ -417,6 +417,21 @@ def _get_equilibrator_client():
 
 
 @st.cache_resource
+def _get_dora_client():
+    """Spawn (or reuse a cached) DORA-XGB feasibility subprocess (runs in
+    the separate dora_xgb env). ~5-10s the first time; reused after."""
+    try:
+        from dora_xgb_client import DoraXGBClient
+        return DoraXGBClient()
+    except Exception as e:
+        st.warning(
+            f"Could not start DORA-XGB: `{type(e).__name__}: {e}`. "
+            "Ranking will run without feasibility. (Is the dora_xgb env set up?)"
+        )
+        return None
+
+
+@st.cache_resource
 def _get_rmg_client():
     """
     Spawn (or reuse a cached) RMG Python-2.7 subprocess for thermo
@@ -653,6 +668,19 @@ with st.container(border=True):
             help="Reward routes that reuse the same procedure (cheaper to "
                  "develop). Discounts high-diversity routes, never gates.")
 
+    m_enable_dora = st.checkbox(
+        "Feasibility (DORA-XGB)",
+        value=False,
+        help="Score each BIO reaction with the DORA-XGB enzymatic-feasibility "
+             "model (runs in a separate env; ~5-10s to start). Applies to bio "
+             "steps only; chem steps aren't penalised.",
+    )
+    m_feasibility = st.number_input(
+        "Feasibility weight", 0, 10, int(LEMNISCA_DEFAULT_WEIGHTS["feasibility"]),
+        disabled=not m_enable_dora,
+        help="Weight on DORA-XGB feasibility within the Lemnisca sub-score.",
+    )
+
     # Tier 0 — DORAnet's own internals (advanced)
     with st.expander("⚙️  Advanced: DORAnet internal weights", expanded=False):
         st.caption(
@@ -693,6 +721,8 @@ if rank_button:
         "stability": int(m_stability),
         "diversity": int(m_diversity),
     }
+    if m_enable_dora:
+        lemnisca_weights["feasibility"] = int(m_feasibility)
     _rank_thermo = _get_rmg_client() if config.enable_rmg else None
     _eq_client = None
     if config.enable_equilibrator:
@@ -700,6 +730,10 @@ if rank_button:
             "Initializing equilibrator (first run of session takes ~20s)…"
         ):
             _eq_client = _get_equilibrator_client()
+    _dora_client = None
+    if m_enable_dora:
+        with st.spinner("Starting DORA-XGB feasibility model (first run ~5-10s)…"):
+            _dora_client = _get_dora_client()
     with st.spinner(
         "Ranking pathways with DORAnet's scorer — this can take a few "
         "minutes (single-threaded on Windows)…"
@@ -708,6 +742,7 @@ if rank_button:
             config, weights=weights, layer_weights=layer_weights,
             lemnisca_weights=lemnisca_weights,
             thermo_calc=_rank_thermo, equilibrator_client=_eq_client,
+            dora_client=_dora_client,
         )
 
 # ---- Decide which set to display: ranked if available, else unranked ----
@@ -759,6 +794,7 @@ with tab_pathways:
                 "Lemnisca": _fnum(p.lemnisca_score),
                 "Stability": _comp(p, "stability"),
                 "Diversity": _comp(p, "diversity"),
+                "Feasibility": _comp(p, "feasibility"),
                 "Steps": p.num_steps,
                 "Max ΔH (kJ/mol)": _fmt_dh(p.max_dh),
                 "Atom econ.": round(p.atomic_economy, 2),

@@ -40,4 +40,8 @@ class RankRequest(BaseModel):
     dict is optional; omitted → the pipeline's built-in defaults."""
     weights: Optional[dict] = None            # tier-0: DORAnet internals
     layer_weights: Optional[dict] = None      # tier-2: DORAnet vs Lemnisca
-    lemnisca_weights: Optional[dict] = None   # tier-1: stability, diversity
+    lemnisca_weights: Optional[dict] = None   # tier-1: stability, diversity, feasibility
+    # Spawn the DORA-XGB feasibility model (separate env) and include it as
+    # a Lemnisca criterion. Off by default — the model takes a few seconds
+    # to load and only matters for bio pathways.
+    enable_dora: bool = False

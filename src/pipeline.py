@@ -356,6 +356,7 @@ def rank_pathways(
     lemnisca_weights: Optional[dict] = None,
     thermo_calc: Optional[Callable[[str], Optional[float]]] = None,
     equilibrator_client: Optional[Any] = None,
+    dora_client: Optional[Any] = None,
 ) -> PipelineResult:
     """
     RANKING phase: run DORAnet's pathway_ranking (with adjustable
@@ -432,6 +433,7 @@ def rank_pathways(
         layer_weights=layer_weights,
         lemnisca_weights=lemnisca_weights,
         excluded_smiles=excluded,
+        dora_client=dora_client,
     )
 
     return PipelineResult(

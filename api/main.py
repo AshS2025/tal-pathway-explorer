@@ -82,15 +82,32 @@ _dpp.Pool = _InProcessPool
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from pipeline import (
     PipelineConfig, run_pipeline, rank_pathways,
     validate_config, cleanup_job_files,
 )
+from pathway_tools import load_pathways_from_file
+from visualize_pathways import visualize_pathways
 from . import jobs
 from .schemas import GenerateRequest, RankRequest
 
 app = FastAPI(title="TAL Pathway Explorer API", version="0.1.0")
+
+# DORA-XGB feasibility model lives in a separate conda env; spawning it
+# takes a few seconds, so we keep one long-running client and reuse it
+# across ranking jobs. Lazily created on first use.
+_dora_client = None
+
+
+def _get_dora_client():
+    """Return a shared DoraXGBClient, or None if its env isn't set up."""
+    global _dora_client
+    if _dora_client is None:
+        from dora_xgb_client import DoraXGBClient
+        _dora_client = DoraXGBClient()
+    return _dora_client
 
 # DEV: let the React dev server (a different origin/port) call us.
 # Tighten allow_origins before deploying anywhere public.
@@ -135,6 +152,40 @@ def start_run(req: GenerateRequest):
     return {"run_id": run.id, "status": run.status}
 
 
+@app.get("/runs/{run_id}/graph", response_class=HTMLResponse)
+def get_graph(run_id: str, view: str = "all"):
+    """Render the interactive pathway graph as self-contained HTML.
+    view="all" shows every pathway; view="top5" shows the 5 shortest.
+    The React Graph tab embeds this in an <iframe>."""
+    run = jobs.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if run.status not in ("generated", "ranking", "ranked"):
+        raise HTTPException(status_code=409, detail="no pathways to graph yet")
+    cfg = run.config
+
+    if view == "top5":
+        raw = load_pathways_from_file(cfg.job_name)
+        order = sorted(range(1, len(raw) + 1), key=lambda i: raw[i - 1].num_steps)
+        pathway_filter = order[:5]
+    else:
+        pathway_filter = "all"
+
+    path = visualize_pathways(
+        job_name=cfg.job_name,
+        starter_smiles=cfg.starter_smiles,
+        target_smiles=cfg.target_smiles,
+        starter_label="starter",
+        target_label="target",
+        helpers=cfg.helpers,
+        pathway_filter=pathway_filter,
+        output_html=f"{cfg.job_name}_graph_{view}.html",
+        top_n_threshold=10 ** 9,   # we control the view; disable auto top-N
+    )
+    with open(path, encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
 @app.get("/runs/{run_id}")
 def get_run(run_id: str):
     """Poll a run's full state: status, generated pathways, ranked
@@ -161,11 +212,18 @@ def start_rank(run_id: str, req: RankRequest):
     jobs.set_status(run, "ranking")
 
     def _worker(r: jobs.Run) -> None:
+        dora = None
+        if req.enable_dora:
+            try:
+                dora = _get_dora_client()
+            except Exception as e:      # env missing / spawn failed → skip it
+                print(f"DORA-XGB unavailable, ranking without it: {e}")
         result = rank_pathways(
             config,
             weights=req.weights,
             layer_weights=req.layer_weights,
             lemnisca_weights=req.lemnisca_weights,
+            dora_client=dora,
         )
         if not result.ok:
             r.status, r.error = "error", result.error

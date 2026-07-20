@@ -1,0 +1,41 @@
+:root {
+  --bg: #ffffff;
+  --panel: #f7f7f9;
+  --border: #e2e2e7;
+  --text: #1f2430;
+  --muted: #6b7280;
+  --accent: #6d28d9;
+  --accent-weak: #ede9fe;
+  --mono: ui-monospace, Consolas, monospace;
+  font: 15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 26px;
+  margin: 0 0 16px;
+}
+h2 {
+  font-size: 18px;
+}
+h3 {
+  font-size: 15px;
+  margin: 16px 0 8px;
+}
+p {
+  margin: 0 0 8px;
+}
