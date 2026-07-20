@@ -91,6 +91,7 @@ from pipeline import (
 from pathway_tools import load_pathways_from_file
 from visualize_pathways import visualize_pathways
 from . import jobs
+from .cache import cache, generation_key, ranking_key
 from .schemas import GenerateRequest, RankRequest
 
 app = FastAPI(title="TAL Pathway Explorer API", version="0.1.0")
@@ -137,6 +138,22 @@ def start_run(req: GenerateRequest):
     err = validate_config(config)
     if err:
         raise HTTPException(status_code=422, detail=err)
+
+    # ---- generation cache ----
+    # If an identical generation already ran (same inputs, canonicalized —
+    # see cache.py) AND its pathway file is still on disk, adopt that run's
+    # job_name so the graph/rank endpoints resolve against the existing
+    # artifacts, and serve its result instantly (no expansion).
+    gkey = generation_key(config)
+    hit = cache.get_generation(gkey)
+    if hit and Path(f"{hit['job_name']}_pathways.txt").exists():
+        config.job_name = hit["job_name"]     # point at the cached artifacts
+        run.config = config
+        run.pathways = hit["pathways"]
+        run.diagnostics = {**hit["diagnostics"], "gen_cache_hit": True}
+        jobs.set_status(run, "generated")
+        return {"run_id": run.id, "status": run.status}
+
     run.config = config
     jobs.set_status(run, "generating")
 
@@ -155,6 +172,11 @@ def start_run(req: GenerateRequest):
         r.pathways = result.to_dict()["ranked_pathways"]
         r.diagnostics = result.diagnostics
         r.status = "generated"
+        cache.put_generation(gkey, {
+            "pathways": r.pathways,
+            "diagnostics": r.diagnostics,
+            "job_name": config.job_name,
+        })
 
     jobs.run_in_background(run, _worker)
     return {"run_id": run.id, "status": run.status}
@@ -217,6 +239,19 @@ def start_rank(run_id: str, req: RankRequest):
             detail=f"run not ready to rank (status={run.status})",
         )
     config = run.config
+
+    # ---- ranking cache ----
+    # Keyed on the generation key PLUS the weight tiers, so re-ranking the
+    # same pathways with the same weights is instant; changing a weight is
+    # a miss and re-ranks (without re-expanding).
+    rkey = ranking_key(config, req.weights, req.layer_weights, req.lemnisca_weights)
+    hit = cache.get_ranking(rkey)
+    if hit:
+        run.ranked_pathways = hit["ranked_pathways"]
+        run.diagnostics = {**run.diagnostics, **hit["diagnostics"], "rank_cache_hit": True}
+        jobs.set_status(run, "ranked")
+        return {"run_id": run.id, "status": run.status}
+
     jobs.set_status(run, "ranking")
 
     def _worker(r: jobs.Run) -> None:
@@ -232,6 +267,10 @@ def start_rank(run_id: str, req: RankRequest):
         r.ranked_pathways = result.to_dict()["ranked_pathways"]
         r.diagnostics = {**r.diagnostics, **result.diagnostics}
         r.status = "ranked"
+        cache.put_ranking(rkey, {
+            "ranked_pathways": r.ranked_pathways,
+            "diagnostics": result.diagnostics,
+        })
 
     jobs.run_in_background(run, _worker)
     return {"run_id": run.id, "status": run.status}

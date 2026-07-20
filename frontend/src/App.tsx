@@ -119,6 +119,13 @@ export default function App() {
                   bio pathway(s) during generation.
                 </p>
               )}
+              {(run.diagnostics?.gen_cache_hit || run.diagnostics?.rank_cache_hit) && (
+                <p className="muted">
+                  ⚡ Served from cache — identical inputs
+                  {run.diagnostics?.rank_cache_hit ? " and weights" : ""}, no
+                  re-{run.diagnostics?.rank_cache_hit ? "ranking" : "expansion"} needed.
+                </p>
+              )}
               {(status === "generated" || status === "ranking" || status === "ranked") && (
                 <PathwaysView pathways={pathways} ranked={isRanked} />
               )}
