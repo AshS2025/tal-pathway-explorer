@@ -54,6 +54,32 @@ export interface Pathway {
   lemnisca_components: Record<string, number>;
 }
 
+// ---- enzyme lookup (UniProt) ----
+export interface Enzyme {
+  accession: string;
+  protein_name: string;
+  ec: string[];
+  gene: string;
+  organism: string;
+  reactions: string[];
+  reactions_truncated: boolean;
+}
+
+export interface RuleEnzymes {
+  rule: string;
+  total: number; // enzymes annotated on the rule
+  shown: number; // of those, how many resolved in UniProt
+  truncated: boolean;
+  enzymes: Enzyme[];
+}
+
+export async function fetchRuleEnzymes(
+  rule: string,
+  limit = 25,
+): Promise<RuleEnzymes> {
+  return jsonOrThrow(await fetch(`${BASE}/rules/${rule}/enzymes?limit=${limit}`));
+}
+
 export type RunStatus =
   | "pending"
   | "generating"

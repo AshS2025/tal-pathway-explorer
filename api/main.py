@@ -90,7 +90,8 @@ from pipeline import (
 )
 from pathway_tools import load_pathways_from_file
 from visualize_pathways import visualize_pathways
-from enzyme_info import annotate_pathways
+from enzyme_info import annotate_pathways, enzyme_ids_for_rule
+import uniprot_client
 from . import jobs
 from .cache import cache, generation_key, ranking_key
 from .schemas import GenerateRequest, RankRequest
@@ -234,6 +235,24 @@ def get_graph(run_id: str, view: str = "all"):
     )
     with open(path, encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
+
+
+@app.get("/rules/{rule_name}/enzymes")
+def rule_enzymes(rule_name: str, limit: int = 25):
+    """Resolve the enzymes for one bio rule to human-readable metadata
+    (protein name, EC, reaction, gene, organism) via UniProt. On-demand and
+    capped, because a rule can list thousands of accessions — the frontend
+    calls this when the user expands a bio step."""
+    ids = enzyme_ids_for_rule(rule_name)
+    limit = max(0, min(limit, 200))
+    enzymes = uniprot_client.resolve(ids[:limit])
+    return {
+        "rule": rule_name,
+        "total": len(ids),                 # enzymes annotated on the rule
+        "shown": len(enzymes),             # of those, how many resolved in UniProt
+        "truncated": len(ids) > limit,
+        "enzymes": enzymes,
+    }
 
 
 @app.get("/runs/{run_id}")

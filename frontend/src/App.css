@@ -198,10 +198,37 @@ ol.steps .rxn {
 ol.steps .enz {
   font-size: 12px;
   color: #2e7d32;      /* green: known enzyme(s) */
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+ol.steps .enz:hover {
+  text-decoration: underline;
 }
 ol.steps .enz-none {
   font-size: 12px;
   color: #b26a00;      /* amber: no known enzyme (possibly spontaneous) */
+}
+.enz-panel {
+  margin: 6px 0 4px;
+  overflow-x: auto;
+}
+table.enz-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+table.enz-table th,
+table.enz-table td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+table.enz-table thead {
+  background: var(--panel);
 }
 
 /* ---- graph ---- */
