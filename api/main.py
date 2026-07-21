@@ -119,6 +119,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Reclaim disk from previous sessions' leftover run files on startup. The
+# run store is empty at this point, so every api_* artefact is an orphan.
+jobs.sweep_orphan_api_artifacts()
+
 
 @app.get("/health")
 def health():
