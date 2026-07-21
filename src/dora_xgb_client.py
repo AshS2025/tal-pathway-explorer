@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 from typing import Optional
 
 
@@ -49,6 +50,11 @@ class DoraXGBClient:
         self._closed = True
         self._proc = None
         self._cache: dict[str, Optional[float]] = {}
+        # The subprocess speaks a strict one-line-in / one-line-out protocol
+        # over a single pipe, so only one thread may hold that conversation
+        # at a time — otherwise concurrent callers cross their replies. The
+        # API runs jobs on a thread pool, so this lock is load-bearing.
+        self._lock = threading.Lock()
 
         if not os.path.isfile(dora_python):
             raise FileNotFoundError(
@@ -88,9 +94,20 @@ class DoraXGBClient:
         or None if it can't be scored."""
         if self._closed:
             raise RuntimeError("DoraXGBClient is already closed.")
-        if rxn_smiles in self._cache:
-            return self._cache[rxn_smiles]
+        # Hold the lock across the cache check AND the pipe round-trip: two
+        # threads must never interleave writes/reads on the shared pipe, and
+        # the cache read/write is guarded for free.
+        with self._lock:
+            if rxn_smiles in self._cache:
+                return self._cache[rxn_smiles]
+            value = self._query(rxn_smiles)
+            self._cache[rxn_smiles] = value
+            return value
 
+    def _query(self, rxn_smiles: str) -> Optional[float]:
+        """One write+read round-trip on the subprocess pipe. The caller MUST
+        hold self._lock — the protocol is strictly one line in, one line out,
+        so overlapping calls would cross their replies."""
         try:
             self._proc.stdin.write(rxn_smiles + "\n")
             self._proc.stdin.flush()
@@ -102,15 +119,11 @@ class DoraXGBClient:
             raise RuntimeError("DORA-XGB server gave no reply — process may have died.")
 
         if reply == "NO_SCORE":
-            value: Optional[float] = None
-        else:
-            try:
-                value = float(reply)
-            except ValueError:
-                value = None
-
-        self._cache[rxn_smiles] = value
-        return value
+            return None
+        try:
+            return float(reply)
+        except ValueError:
+            return None
 
     # convenience: make the instance callable, like RMGThermoClient
     def __call__(self, rxn_smiles: str) -> Optional[float]:
