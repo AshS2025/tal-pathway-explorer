@@ -25,6 +25,9 @@ uvicorn[standard]==0.51.0
 #     "equilibrator" thermodynamics option in the UI) ---
 equilibrator-api==0.6.0
 
+# --- dev/test only (run `pytest` from the project root) ---
+pytest==8.4.2
+
 # NOTE: the RMG thermodynamics option is a separate advanced feature that
 # needs its own Python 2.7 environment (rmg_env) and is NOT installed by
 # this file. Leave RMG disabled in the UI unless that env is set up.
