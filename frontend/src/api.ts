@@ -43,6 +43,9 @@ export interface Pathway {
   reaction_smiles: string[];
   reaction_names: string[];
   reaction_enthalpies: (number | null)[];
+  // per-step enzyme count for BIO steps (null for chem steps; 0 = no known
+  // enzyme, possibly spontaneous). Parallel to reaction_names.
+  reaction_enzymes?: (number | null)[];
   equilibrator_max_dg: number | null;
   equilibrator_avg_dg: number | null;
   equilibrator_coverage: number;

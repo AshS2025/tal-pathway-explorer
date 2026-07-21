@@ -90,6 +90,7 @@ from pipeline import (
 )
 from pathway_tools import load_pathways_from_file
 from visualize_pathways import visualize_pathways
+from enzyme_info import annotate_pathways
 from . import jobs
 from .cache import cache, generation_key, ranking_key
 from .schemas import GenerateRequest, RankRequest
@@ -186,6 +187,7 @@ def start_run(req: GenerateRequest):
             jobs.complete(r, "error", error=result.error)
             return
         pathways = result.to_dict()["ranked_pathways"]
+        annotate_pathways(pathways)   # per-step enzyme counts (bio steps)
         # Cache the (valid) result even if we finished past the deadline — a
         # future identical request then returns instantly and won't time out.
         cache.put_generation(gkey, {
@@ -283,6 +285,7 @@ def start_rank(run_id: str, req: RankRequest):
             jobs.complete(r, "error", error=result.error)
             return
         ranked = result.to_dict()["ranked_pathways"]
+        annotate_pathways(ranked)     # per-step enzyme counts (bio steps)
         cache.put_ranking(rkey, {
             "ranked_pathways": ranked,
             "diagnostics": result.diagnostics,

@@ -195,6 +195,14 @@ ol.steps .rxn {
   margin-top: 2px;
   word-break: break-all;
 }
+ol.steps .enz {
+  font-size: 12px;
+  color: #2e7d32;      /* green: known enzyme(s) */
+}
+ol.steps .enz-none {
+  font-size: 12px;
+  color: #b26a00;      /* amber: no known enzyme (possibly spontaneous) */
+}
 
 /* ---- graph ---- */
 .graph-toggle {

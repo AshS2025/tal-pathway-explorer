@@ -16,12 +16,18 @@ function Steps({ p }: { p: Pathway }) {
       {p.reaction_smiles.map((smi, i) => {
         const [lhs, rhs] = smi.split(">>");
         const dh = p.reaction_enthalpies[i];
+        const enz = p.reaction_enzymes?.[i];   // null = chem step; 0 = bio, no enzyme
         return (
           <li key={i}>
             <span className="op">{p.reaction_names[i]}</span>
             {dh !== null && dh !== undefined ? (
               <span className="dh"> ΔH={dh.toFixed(1)}</span>
             ) : null}
+            {enz === null || enz === undefined ? null : enz === 0 ? (
+              <span className="enz-none"> · no enzyme (possibly spontaneous)</span>
+            ) : (
+              <span className="enz"> · {enz} enzyme{enz === 1 ? "" : "s"}</span>
+            )}
             <div className="rxn">
               {(lhs ?? "").split(".").map(trunc).join(" + ")} <b>→</b>{" "}
               {(rhs ?? "").split(".").map(trunc).join(" + ")}
