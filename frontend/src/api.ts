@@ -58,11 +58,12 @@ export interface Pathway {
 export interface Enzyme {
   accession: string;
   protein_name: string;
+  deleted: boolean; // UniProt entry was removed/demerged
   ec: string[];
   gene: string;
   organism: string;
-  reactions: string[];
-  reactions_truncated: boolean;
+  reactions: string[]; // populated only when reaction_count is small (<= 3)
+  reaction_count: number; // true total; UI links to UniProt when > 3
 }
 
 export interface RuleEnzymes {

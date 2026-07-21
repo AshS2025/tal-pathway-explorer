@@ -33,6 +33,7 @@ def test_human_readable_reaction_extracted():
     # the reaction equation is pulled out of the verbose catalytic-activity blob
     assert recs["P42765"]["reactions"][0] == "an acyl-CoA + acetyl-CoA = a 3-oxoacyl-CoA + CoA"
     assert recs["D2I940"]["reactions"] == ["succinyl-CoA + acetyl-CoA = 3-oxoadipyl-CoA + CoA"]
+    assert recs["D2I940"]["reaction_count"] == 1
 
 
 def test_gene_and_organism():
@@ -50,11 +51,24 @@ def test_blank_ec_column_is_ok():
     assert recs["D2I940"]["reactions"]                          # still got the reaction
 
 
-def test_reactions_are_capped_and_flagged():
+def test_multifunctional_enzyme_reports_true_count_and_caps_inline():
     recs = {r["accession"]: r for r in uniprot_client.parse_tsv(_fixture_tsv())}
-    # Q64428 is multifunctional with dozens of reactions -> capped + flagged
-    assert len(recs["Q64428"]["reactions"]) == uniprot_client._MAX_REACTIONS
-    assert recs["Q64428"]["reactions_truncated"] is True
+    # Q64428 is multifunctional with dozens of reactions: inline list is
+    # capped, but the true total is reported so the UI can link out.
+    assert len(recs["Q64428"]["reactions"]) <= uniprot_client._MAX_INLINE_REACTIONS
+    assert recs["Q64428"]["reaction_count"] > 3
+
+
+def test_deleted_entry_is_flagged_not_named():
+    tsv = (
+        "Entry\tProtein names\tEC number\tGene Names\tOrganism\tCatalytic activity\n"
+        "A0A072ZQE7\tdeleted\t\t\t\t\n"
+    )
+    rec = uniprot_client.parse_tsv(tsv)[0]
+    assert rec["accession"] == "A0A072ZQE7"
+    assert rec["deleted"] is True
+    assert rec["protein_name"] == ""          # not the literal "deleted"
+    assert rec["ec"] == [] and rec["reaction_count"] == 0
 
 
 def test_empty_input():

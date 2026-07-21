@@ -258,8 +258,9 @@ def _bio_op_enzyme_labels(pathways) -> dict:
         if not ids:
             continue
         recs = uniprot_client.resolve(ids[:5])   # one name is enough for a label
-        if recs and recs[0].get("protein_name"):
-            labels[rule] = recs[0]["protein_name"]
+        name = next((r["protein_name"] for r in recs if r.get("protein_name")), None)
+        if name:
+            labels[rule] = name
     return labels
 
 

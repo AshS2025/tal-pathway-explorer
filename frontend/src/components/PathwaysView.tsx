@@ -56,20 +56,41 @@ function EnzymeTable({ rule }: { rule: string }) {
             </tr>
           </thead>
           <tbody>
-            {data.enzymes.map((e) => (
-              <tr key={e.accession}>
-                <td>{e.protein_name || e.accession}</td>
-                <td>{e.ec.join(", ") || "—"}</td>
-                <td>
-                  {e.reactions[0] ?? "—"}
-                  {e.reactions_truncated ? " …" : ""}
-                </td>
-                <td>{e.gene || "—"}</td>
-                <td>
-                  <i>{e.organism || "—"}</i>
-                </td>
-              </tr>
-            ))}
+            {data.enzymes.map((e) => {
+              const uniprotUrl = `https://www.uniprot.org/uniprotkb/${e.accession}/entry`;
+              return (
+                <tr key={e.accession}>
+                  <td>
+                    {e.deleted ? (
+                      <>
+                        {e.accession}{" "}
+                        <span className="muted">(deleted in UniProt)</span>
+                      </>
+                    ) : (
+                      e.protein_name || e.accession
+                    )}
+                  </td>
+                  <td>
+                    {e.ec.length ? e.ec.join(", ") : <span className="muted">no EC</span>}
+                  </td>
+                  <td>
+                    {e.reaction_count === 0 ? (
+                      <span className="muted">no reaction</span>
+                    ) : e.reaction_count <= 3 ? (
+                      e.reactions.map((r, i) => <div key={i}>{r}</div>)
+                    ) : (
+                      <a href={uniprotUrl} target="_blank" rel="noreferrer">
+                        {e.reaction_count} reactions — view in UniProt ↗
+                      </a>
+                    )}
+                  </td>
+                  <td>{e.gene || "—"}</td>
+                  <td>
+                    <i>{e.organism || "—"}</i>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

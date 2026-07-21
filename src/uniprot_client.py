@@ -35,7 +35,11 @@ from typing import Dict, List
 
 _BASE = "https://rest.uniprot.org/uniprotkb/search"
 _FIELDS = "accession,protein_name,ec,gene_names,organism_name,cc_catalytic_activity"
-_MAX_REACTIONS = 5          # cap reactions stored per enzyme (some list dozens)
+# We only show reactions inline when an enzyme has few of them (a
+# multifunctional enzyme with many reactions is ambiguous — we can't tell
+# which matches the rule — so the UI links out to UniProt instead). We still
+# report the true total via `reaction_count`.
+_MAX_INLINE_REACTIONS = 3
 _BATCH = 80                 # accessions per HTTP request (keeps the URL sane)
 _TIMEOUT = 25               # seconds per request
 
@@ -86,9 +90,16 @@ def parse_tsv(tsv: str) -> List[dict]:
             i = idx.get(col)
             return cols[i] if i is not None and i < len(cols) else ""
 
+        # A demerged/removed UniProt entry comes back with the literal name
+        # "deleted" and no other data. Keep it visible (the accession is
+        # still meaningful to a biologist) but flag it rather than showing
+        # "deleted" as if it were a protein name.
+        raw_name = get("Protein names").strip()
+        deleted = raw_name.lower() == "deleted"
+
         ec = [e.strip() for e in get("EC number").split(";") if e.strip()]
         reactions = [r.strip() for r in _REACTION_RE.findall(get("Catalytic activity"))]
-        # de-dupe reactions while preserving order, then cap
+        # de-dupe reactions while preserving order
         seen, uniq = set(), []
         for r in reactions:
             if r not in seen:
@@ -96,12 +107,15 @@ def parse_tsv(tsv: str) -> List[dict]:
                 uniq.append(r)
         out.append({
             "accession": get("Entry"),
-            "protein_name": _primary_name(get("Protein names")),
+            "protein_name": "" if deleted else _primary_name(raw_name),
+            "deleted": deleted,
             "ec": ec,
             "gene": get("Gene Names").split(" ")[0].strip(),   # first gene symbol
             "organism": _scientific_organism(get("Organism")),
-            "reactions": uniq[:_MAX_REACTIONS],
-            "reactions_truncated": len(uniq) > _MAX_REACTIONS,
+            # inline reactions only when there are few; `reaction_count` is
+            # the true total so the UI can link out when there are more.
+            "reactions": uniq[:_MAX_INLINE_REACTIONS],
+            "reaction_count": len(uniq),
         })
     return out
 
