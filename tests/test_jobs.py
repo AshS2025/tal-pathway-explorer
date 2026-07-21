@@ -4,11 +4,21 @@ Runs are capped so the in-memory store can't grow forever, and an evicted
 run's files are deleted — but never when another live run still shares that
 job_name (cache hits reuse an earlier run's files). In-flight runs are never
 evicted. jobs.py is stdlib-only, so these run without doranet/FastAPI."""
+import time
 import types
 
 import pytest
 
 from api import jobs
+
+
+def _wait(pred, timeout=3.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        if pred():
+            return True
+        time.sleep(0.01)
+    return False
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +77,49 @@ def test_shared_job_name_files_are_preserved(tmp_path):
     _terminal(job)                             # r2 ALSO uses job (cache-hit clone)
     jobs.create_run()                          # evicts r1, but r2 still shares job
     assert f.exists()                          # files kept for the survivor
+
+
+def test_job_times_out_with_friendly_message():
+    run = jobs.create_run()
+
+    def slow_worker(r):
+        time.sleep(0.6)                     # longer than the timeout below
+        jobs.complete(r, "generated", pathways=[1])
+
+    jobs.run_in_background(run, slow_worker, timeout=0.05,
+                           timeout_message="too long, tighten params")
+    assert _wait(lambda: run.status == "error"), "should have timed out"
+    assert run.timed_out is True
+    assert "tighten params" in run.error
+
+    # the slow worker finishes AFTER the deadline — it must NOT resurrect the run
+    time.sleep(0.7)                         # let slow_worker (0.6s) run to completion
+    assert run.status == "error" and "tighten params" in run.error
+    assert run.pathways is None             # late result was discarded by complete()
+
+
+def test_fast_job_completes_normally():
+    run = jobs.create_run()
+
+    def quick_worker(r):
+        jobs.complete(r, "generated", pathways=[1, 2])
+
+    jobs.run_in_background(run, quick_worker, timeout=5)
+    assert _wait(lambda: run.status == "generated")
+    assert run.timed_out is False
+    assert run.pathways == [1, 2]
+
+
+def test_worker_exception_marks_error():
+    run = jobs.create_run()
+
+    def boom(r):
+        raise ValueError("kaboom")
+
+    jobs.run_in_background(run, boom, timeout=5)
+    assert _wait(lambda: run.status == "error")
+    assert "kaboom" in run.error
+    assert run.timed_out is False
 
 
 def test_purge_job_files_only_matches_exact_prefix(tmp_path):

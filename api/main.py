@@ -96,6 +96,18 @@ from .schemas import GenerateRequest, RankRequest
 
 app = FastAPI(title="TAL Pathway Explorer API", version="0.1.0")
 
+# Shown to the user when a job hits its wall-clock deadline (see jobs.py).
+_GEN_TIMEOUT_MSG = (
+    "This search took too long and was stopped. The search space is probably "
+    "too large — try lowering Generations, Beam size, or Max MW, or narrowing "
+    "the whitelist, then run again."
+)
+_RANK_TIMEOUT_MSG = (
+    "Ranking took too long and was stopped. Ranking is single-threaded and "
+    "slow on large pathway sets — try tightening the search so fewer pathways "
+    "are generated, then rank again."
+)
+
 # DORA-XGB feasibility model lives in a separate conda env; spawning it
 # takes a few seconds, so we keep one long-running client and reuse it
 # across ranking jobs. Lazily created on first use.
@@ -171,18 +183,20 @@ def start_run(req: GenerateRequest):
                 print(f"DORA-XGB unavailable, generating without feasibility prune: {e}")
         result = run_pipeline(config, dora_client=dora)
         if not result.ok:
-            r.status, r.error = "error", result.error
+            jobs.complete(r, "error", error=result.error)
             return
-        r.pathways = result.to_dict()["ranked_pathways"]
-        r.diagnostics = result.diagnostics
-        r.status = "generated"
+        pathways = result.to_dict()["ranked_pathways"]
+        # Cache the (valid) result even if we finished past the deadline — a
+        # future identical request then returns instantly and won't time out.
         cache.put_generation(gkey, {
-            "pathways": r.pathways,
-            "diagnostics": r.diagnostics,
+            "pathways": pathways,
+            "diagnostics": result.diagnostics,
             "job_name": config.job_name,
         })
+        jobs.complete(r, "generated", pathways=pathways, diagnostics=result.diagnostics)
 
-    jobs.run_in_background(run, _worker)
+    jobs.run_in_background(run, _worker, timeout=jobs.GENERATION_TIMEOUT_S,
+                           timeout_message=_GEN_TIMEOUT_MSG)
     return {"run_id": run.id, "status": run.status}
 
 
@@ -266,15 +280,16 @@ def start_rank(run_id: str, req: RankRequest):
             lemnisca_weights=req.lemnisca_weights,
         )
         if not result.ok:
-            r.status, r.error = "error", result.error
+            jobs.complete(r, "error", error=result.error)
             return
-        r.ranked_pathways = result.to_dict()["ranked_pathways"]
-        r.diagnostics = {**r.diagnostics, **result.diagnostics}
-        r.status = "ranked"
+        ranked = result.to_dict()["ranked_pathways"]
         cache.put_ranking(rkey, {
-            "ranked_pathways": r.ranked_pathways,
+            "ranked_pathways": ranked,
             "diagnostics": result.diagnostics,
         })
+        jobs.complete(r, "ranked", ranked_pathways=ranked,
+                      diagnostics={**r.diagnostics, **result.diagnostics})
 
-    jobs.run_in_background(run, _worker)
+    jobs.run_in_background(run, _worker, timeout=jobs.RANKING_TIMEOUT_S,
+                           timeout_message=_RANK_TIMEOUT_MSG)
     return {"run_id": run.id, "status": run.status}

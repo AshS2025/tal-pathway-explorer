@@ -15,7 +15,7 @@ import threading
 import traceback
 import uuid
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -33,6 +33,12 @@ _runs: "OrderedDict[str, Run]" = OrderedDict()
 _MAX_RUNS = 200
 _TERMINAL_STATUSES = {"generated", "ranked", "error"}
 
+# Wall-clock ceilings (seconds) so a pathological config (e.g. a bio
+# combinatorial explosion) can't wedge a worker forever. Generous — meant
+# to catch runaways, not cut off legitimately long runs. Tune freely.
+GENERATION_TIMEOUT_S = 600      # 10 min
+RANKING_TIMEOUT_S = 1800        # 30 min (ranking is single-threaded, slow)
+
 
 @dataclass
 class Run:
@@ -45,6 +51,7 @@ class Run:
     ranked_pathways: Optional[list] = None    # ranking result
     diagnostics: dict = field(default_factory=dict)
     error: Optional[str] = None
+    timed_out: bool = False                   # set by the timeout watchdog
 
     def to_dict(self) -> dict:
         return {
@@ -128,17 +135,63 @@ def set_status(run: Run, status: str) -> None:
         run.status = status
 
 
-def run_in_background(run: Run, worker: Callable[["Run"], None]) -> None:
+def complete(run: Run, status: str, **fields: Any) -> None:
+    """Set a run's terminal result fields + status — UNLESS it already timed
+    out, in which case the timeout error is kept. Thread-safe. Workers should
+    use this instead of assigning run.status directly, so a job that finishes
+    just after its deadline can't resurrect an already-failed run."""
+    with _lock:
+        if run.timed_out:
+            return
+        for k, v in fields.items():
+            setattr(run, k, v)
+        run.status = status
+
+
+def run_in_background(
+    run: Run,
+    worker: Callable[["Run"], None],
+    *,
+    timeout: Optional[float] = None,
+    timeout_message: Optional[str] = None,
+) -> None:
     """Execute `worker(run)` on the thread pool. The worker mutates `run`
-    (its result fields + status). If it raises, the run is marked errored
-    with the exception message (and the traceback is logged server-side)."""
+    (its result fields + status, via complete()). If it raises, the run is
+    marked errored with the exception message (traceback logged server-side).
+
+    If `timeout` seconds elapse before the worker finishes, the run is marked
+    errored with `timeout_message` and flagged timed_out so a late-finishing
+    worker won't overwrite it.
+
+    NOTE: Python can't forcibly kill a thread, so a runaway job keeps running
+    in the background until it returns. This protects the USER experience
+    (clear message, run marked failed) but doesn't free the CPU mid-run — a
+    hard kill would require running jobs as separate processes (deferred)."""
     def _task() -> None:
         try:
             worker(run)
         except Exception as e:            # noqa: BLE001 - report any failure
             traceback.print_exc()
             with _lock:
-                run.status = "error"
-                run.error = f"{type(e).__name__}: {e}"
+                if not run.timed_out:
+                    run.status = "error"
+                    run.error = f"{type(e).__name__}: {e}"
 
-    _executor.submit(_task)
+    future = _executor.submit(_task)
+
+    if timeout:
+        def _watch() -> None:
+            try:
+                future.result(timeout=timeout)   # wait, but don't block a worker slot
+            except FuturesTimeout:
+                with _lock:
+                    if run.status not in _TERMINAL_STATUSES:
+                        run.timed_out = True
+                        run.status = "error"
+                        run.error = timeout_message or (
+                            f"This run exceeded the {int(timeout)}s time limit "
+                            "and was stopped."
+                        )
+            except Exception:              # real failures are handled in _task
+                pass
+        threading.Thread(target=_watch, daemon=True).start()
