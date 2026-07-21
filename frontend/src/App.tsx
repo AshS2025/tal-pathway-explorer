@@ -53,7 +53,7 @@ export default function App() {
       });
       setTab("pathways");
     } catch (e) {
-      setErr(String(e));
+      setErr(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -65,7 +65,7 @@ export default function App() {
       setRun((r) => (r ? { ...r, status: "ranking" } : r));
       setTab("pathways");
     } catch (e) {
-      setErr(String(e));
+      setErr(e instanceof Error ? e.message : String(e));
     }
   }
 

@@ -30,11 +30,25 @@ def test_valid_config_passes():
     ({"generations": 0},                "between"),
     ({"generations": 99},               "between"),
     ({"helpers": ["O", "C(C"]},         "helper"),
+    # runaway-search guardrails
+    ({"beam_size": 0},                          "Beam size"),
+    ({"beam_size": 10_000_000},                 "too large"),
+    ({"strategy": "cartesian", "generations": 5}, "cartesian"),
 ])
 def test_invalid_configs_are_rejected(over, needle):
     msg = validate_config(cfg(**over))
     assert msg is not None, f"expected rejection for {over}"
     assert needle.lower() in msg.lower(), f"{needle!r} not in {msg!r}"
+
+
+@pytest.mark.parametrize("over", [
+    {},                                              # defaults (priority_queue, gen 3)
+    {"generations": 8},                              # deep, but guided beam -> allowed
+    {"strategy": "cartesian", "generations": 3},     # cartesian at the cap -> allowed
+    {"beam_size": 100_000},                          # exactly the max -> allowed
+])
+def test_reasonable_configs_pass(over):
+    assert validate_config(cfg(**over)) is None
 
 
 def test_starter_equals_target_rejected():

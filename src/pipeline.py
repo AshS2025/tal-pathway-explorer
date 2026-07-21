@@ -195,6 +195,15 @@ class PipelineResult:
 # ============================================================
 # Validation
 # ============================================================
+# Runaway-search guardrails: conservative, tunable ceilings that stop an
+# obviously explosive config from ever starting. Prevention is cheaper and
+# safer than the per-job timeout (api/jobs.py), which is only the backstop
+# for anything that slips through. Adjust these to taste — they're picked to
+# block the clearly-dangerous, not to second-guess reasonable runs.
+MAX_BEAM_SIZE = 100_000
+MAX_CARTESIAN_GENERATIONS = 3
+
+
 def validate_config(config: PipelineConfig) -> Optional[str]:
     """
     Return None if the config is runnable, or an error message string
@@ -233,6 +242,24 @@ def validate_config(config: PipelineConfig) -> Optional[str]:
         )
     if config.generations < 1 or config.generations > 8:
         return "Generations per side must be between 1 and 8."
+
+    # --- runaway-search guardrails (prevent explosions before they start) ---
+    if config.beam_size < 1:
+        return "Beam size must be at least 1."
+    if config.beam_size > MAX_BEAM_SIZE:
+        return (
+            f"Beam size {config.beam_size:,} is too large (max "
+            f"{MAX_BEAM_SIZE:,}). A very large beam removes the guardrail that "
+            "keeps the search bounded — lower it and run again."
+        )
+    if config.strategy == "cartesian" and config.generations > MAX_CARTESIAN_GENERATIONS:
+        return (
+            "The cartesian strategy explores every possibility exhaustively, "
+            f"which explodes past {MAX_CARTESIAN_GENERATIONS} generations. Switch "
+            f"to the priority-queue strategy, or lower generations to "
+            f"{MAX_CARTESIAN_GENERATIONS} or fewer, then run again."
+        )
+
     for h in config.helpers:
         if Chem.MolFromSmiles(h) is None:
             return f"Invalid helper molecule SMILES: `{h}`"
