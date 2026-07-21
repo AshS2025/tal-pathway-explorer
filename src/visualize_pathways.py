@@ -145,6 +145,7 @@ def visualize_pathways(
     output_html: Optional[str] = None,
     img_dir: str = "pathway_images",
     extra_labels: Optional[dict] = None,
+    op_labels: Optional[dict] = None,
     top_n_threshold: int = 20,
     top_n: int = 5,
 ) -> str:
@@ -256,6 +257,7 @@ def visualize_pathways(
         target_label=target_label,
         output_html=output_html,
         extra_labels=extra_labels_canon,
+        op_labels=op_labels or {},
     )
 
     # ── supplementary "top N" graph ────────────────────────────────────
@@ -295,6 +297,7 @@ def visualize_pathways(
             output_html=top_html,
             img_dir=img_dir,
             extra_labels=extra_labels,
+            op_labels=op_labels,
             top_n_threshold=10**9,   # don't recurse further
             top_n=top_n,
         )
@@ -573,8 +576,10 @@ def _render_to_pyvis(
     target_label,
     output_html,
     extra_labels=None,
+    op_labels=None,
 ):
     extra_labels = extra_labels or {}
+    op_labels = op_labels or {}
     net = Network(
         height="800px",
         width="100%",
@@ -685,8 +690,10 @@ def _render_to_pyvis(
         if helper_out:
             helper_note += " (- " + ", ".join(helper_out) + ")"
         pathway_label = ", ".join(str(i) for i in pathways)
+        # For bio steps, show a representative enzyme name under the rule id.
+        enzyme_line = f"<br><i>{op_labels[op]}</i>" if op in op_labels else ""
         tooltip = (
-            f"<b>{op}</b>{helper_note}<br>"
+            f"<b>{op}</b>{enzyme_line}{helper_note}<br>"
             f"In pathway(s): {pathway_label}"
         )
         edge_pathway_map[edge_id] = list(pathways)

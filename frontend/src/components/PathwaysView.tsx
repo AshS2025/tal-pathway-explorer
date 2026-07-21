@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { fetchRuleEnzymes, type Pathway, type RuleEnzymes } from "../api";
 
 const fmt = (x: number | null | undefined) =>
@@ -11,111 +11,138 @@ const comp = (p: Pathway, key: string) => {
 
 const trunc = (s: string, n = 42) => (s.length <= n ? s : s.slice(0, n - 3) + "...");
 
-// Expandable enzyme list for one bio step. Lazily fetches from UniProt (via
-// our backend) the first time it's opened, so we only pay for what's viewed.
-function EnzymeList({ rule, count }: { rule: string; count: number }) {
-  const [open, setOpen] = useState(false);
+// Enzyme metadata table for one bio rule. Fetches from UniProt (via our
+// backend) when mounted — and it's only mounted once its step is expanded,
+// so we pay the lookup only for steps the user actually opens.
+function EnzymeTable({ rule }: { rule: string }) {
   const [data, setData] = useState<RuleEnzymes | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  async function toggle() {
-    const next = !open;
-    setOpen(next);
-    if (next && !data && !loading) {
-      setLoading(true);
-      setErr(null);
-      try {
-        setData(await fetchRuleEnzymes(rule));
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
-      } finally {
-        setLoading(false);
-      }
-    }
-  }
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setErr(null);
+    fetchRuleEnzymes(rule)
+      .then((d) => alive && setData(d))
+      .catch((e) => alive && setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [rule]);
+
+  if (loading) return <p className="muted">Loading enzymes from UniProt…</p>;
+  if (err) return <p className="error">{err}</p>;
+  if (!data) return null;
 
   return (
     <>
-      <button className="enz" type="button" onClick={toggle}>
-        {" · "}
-        {count} enzyme{count === 1 ? "" : "s"} {open ? "▾" : "▸"}
-      </button>
-      {open && (
-        <div className="enz-panel">
-          {loading && <span className="muted">Loading from UniProt…</span>}
-          {err && <span className="error">{err}</span>}
-          {data && (
-            <>
-              {data.shown < data.total && (
-                <p className="muted">
-                  Showing {data.shown} of {data.total} annotated enzymes
-                  {data.shown === 0 ? " (none resolved in UniProt)" : ""}.
-                </p>
-              )}
-              {data.enzymes.length > 0 && (
-                <table className="enz-table">
-                  <thead>
-                    <tr>
-                      <th>Enzyme</th>
-                      <th>EC</th>
-                      <th>Reaction</th>
-                      <th>Gene</th>
-                      <th>Organism</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.enzymes.map((e) => (
-                      <tr key={e.accession}>
-                        <td>{e.protein_name || e.accession}</td>
-                        <td>{e.ec.join(", ") || "—"}</td>
-                        <td>
-                          {e.reactions[0] ?? "—"}
-                          {e.reactions_truncated ? " …" : ""}
-                        </td>
-                        <td>{e.gene || "—"}</td>
-                        <td>
-                          <i>{e.organism || "—"}</i>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </>
-          )}
-        </div>
+      {data.shown < data.total && (
+        <p className="muted">
+          Showing {data.shown} of {data.total} annotated enzymes
+          {data.shown === 0 ? " (none resolved in UniProt)" : ""}.
+        </p>
+      )}
+      {data.enzymes.length > 0 && (
+        <table className="enz-table">
+          <thead>
+            <tr>
+              <th>Enzyme</th>
+              <th>EC</th>
+              <th>Reaction</th>
+              <th>Gene</th>
+              <th>Organism</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.enzymes.map((e) => (
+              <tr key={e.accession}>
+                <td>{e.protein_name || e.accession}</td>
+                <td>{e.ec.join(", ") || "—"}</td>
+                <td>
+                  {e.reactions[0] ?? "—"}
+                  {e.reactions_truncated ? " …" : ""}
+                </td>
+                <td>{e.gene || "—"}</td>
+                <td>
+                  <i>{e.organism || "—"}</i>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </>
   );
 }
 
+// One step in a pathway — itself a dropdown. Collapsed shows the operator +
+// enzyme badge; expanded shows the reaction and (for bio steps) the UniProt
+// enzyme table, fetched lazily on first open.
+function StepItem({
+  name,
+  smi,
+  dh,
+  enz,
+}: {
+  name: string;
+  smi: string;
+  dh: number | null;
+  enz: number | null | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const [lhs, rhs] = smi.split(">>");
+  const isChem = enz === null || enz === undefined;
+  const isBioNoEnzyme = enz === 0;
+
+  return (
+    <details
+      className="step"
+      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>
+        <span className="op">{name}</span>
+        {dh !== null && dh !== undefined ? (
+          <span className="dh"> ΔH={dh.toFixed(1)}</span>
+        ) : null}
+        {isChem ? null : isBioNoEnzyme ? (
+          <span className="enz-none"> · no enzyme (possibly spontaneous)</span>
+        ) : (
+          <span className="enz"> · {enz} enzyme{enz === 1 ? "" : "s"}</span>
+        )}
+      </summary>
+      <div className="step-body">
+        <div className="rxn">
+          {(lhs ?? "").split(".").map(trunc).join(" + ")} <b>→</b>{" "}
+          {(rhs ?? "").split(".").map(trunc).join(" + ")}
+        </div>
+        {open &&
+          (isChem ? (
+            <p className="muted">Chemical operator — no enzyme data.</p>
+          ) : isBioNoEnzyme ? (
+            <p className="enz-none">No known enzyme; this step may be spontaneous.</p>
+          ) : (
+            <EnzymeTable rule={name} />
+          ))}
+      </div>
+    </details>
+  );
+}
+
 function Steps({ p }: { p: Pathway }) {
   return (
-    <ol className="steps">
-      {p.reaction_smiles.map((smi, i) => {
-        const [lhs, rhs] = smi.split(">>");
-        const dh = p.reaction_enthalpies[i];
-        const enz = p.reaction_enzymes?.[i];   // null = chem step; 0 = bio, no enzyme
-        return (
-          <li key={i}>
-            <span className="op">{p.reaction_names[i]}</span>
-            {dh !== null && dh !== undefined ? (
-              <span className="dh"> ΔH={dh.toFixed(1)}</span>
-            ) : null}
-            {enz === null || enz === undefined ? null : enz === 0 ? (
-              <span className="enz-none"> · no enzyme (possibly spontaneous)</span>
-            ) : (
-              <EnzymeList rule={p.reaction_names[i]} count={enz} />
-            )}
-            <div className="rxn">
-              {(lhs ?? "").split(".").map(trunc).join(" + ")} <b>→</b>{" "}
-              {(rhs ?? "").split(".").map(trunc).join(" + ")}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
+    <div className="steps">
+      {p.reaction_smiles.map((smi, i) => (
+        <StepItem
+          key={i}
+          name={p.reaction_names[i]}
+          smi={smi}
+          dh={p.reaction_enthalpies[i]}
+          enz={p.reaction_enzymes?.[i]}
+        />
+      ))}
+    </div>
   );
 }
 

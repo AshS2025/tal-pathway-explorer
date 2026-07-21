@@ -91,6 +91,7 @@ from pipeline import (
 from pathway_tools import load_pathways_from_file
 from visualize_pathways import visualize_pathways
 from enzyme_info import annotate_pathways, enzyme_ids_for_rule
+from pathway_scoring import is_bio_op
 import uniprot_client
 from . import jobs
 from .cache import cache, generation_key, ranking_key
@@ -222,6 +223,8 @@ def get_graph(run_id: str, view: str = "all"):
     else:
         pathway_filter = "all"
 
+    op_labels = _bio_op_enzyme_labels(run.ranked_pathways or run.pathways)
+
     path = visualize_pathways(
         job_name=cfg.job_name,
         starter_smiles=cfg.starter_smiles,
@@ -231,10 +234,33 @@ def get_graph(run_id: str, view: str = "all"):
         helpers=cfg.helpers,
         pathway_filter=pathway_filter,
         output_html=f"{cfg.job_name}_graph_{view}.html",
+        op_labels=op_labels,
         top_n_threshold=10 ** 9,   # we control the view; disable auto top-N
     )
     with open(path, encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
+
+
+def _bio_op_enzyme_labels(pathways) -> dict:
+    """Map each distinct bio rule in these pathways to a representative
+    enzyme name (the first that resolves), for the graph's edge tooltips.
+    Cached + degrades gracefully — if UniProt is unreachable, a rule just
+    keeps its rule-id label with no enzyme name."""
+    rules = {
+        name
+        for p in (pathways or [])
+        for name in p.get("reaction_names", [])
+        if is_bio_op(name)
+    }
+    labels: dict = {}
+    for rule in rules:
+        ids = enzyme_ids_for_rule(rule)
+        if not ids:
+            continue
+        recs = uniprot_client.resolve(ids[:5])   # one name is enough for a label
+        if recs and recs[0].get("protein_name"):
+            labels[rule] = recs[0]["protein_name"]
+    return labels
 
 
 @app.get("/rules/{rule_name}/enzymes")
