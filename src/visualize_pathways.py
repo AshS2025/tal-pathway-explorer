@@ -354,6 +354,30 @@ def _select_pathways(pathways, filter_spec):
     raise ValueError(f"Unknown pathway_filter: {filter_spec!r}")
 
 
+def _chain_endpoints(r_real, p_real, produced, consumed, *, starter, target):
+    """Pick the arrow's source and target for one reaction so it follows the
+    growing chain, not whichever molecule was listed first.
+
+    source (primary_in)  = a reactant produced earlier in this pathway (a
+        real intermediate), else the starter if present, else the 1st reactant.
+    target (primary_out) = a product consumed later in this pathway, or the
+        overall target, else the 1st product.
+
+    r_real / p_real are the reaction's non-helper reactants / products;
+    `produced` / `consumed` are the sets of real molecules produced / consumed
+    across the whole pathway.
+    """
+    primary_in = next((r for r in r_real if r in produced), None)
+    if primary_in is None:
+        primary_in = starter if starter in r_real else r_real[0]
+    primary_out = next(
+        (pp for pp in p_real if pp == target or pp in consumed), None
+    )
+    if primary_out is None:
+        primary_out = p_real[0]
+    return primary_in, primary_out
+
+
 def _build_networkx_graph(selected_pathways, starter, helpers,
                            *, target_smiles=None,
                            helper_fingerprints=None):
@@ -412,27 +436,44 @@ def _build_networkx_graph(selected_pathways, starter, helpers,
     edge_records = {}    # (u, v, op) -> {pathways:set, co_subs, byproducts}
     visible_mols = set()
     for idx, p in selected_pathways:
+        # First pass over THIS pathway: which real molecules it PRODUCES vs
+        # CONSUMES. A molecule both produced and consumed is a growing-chain
+        # intermediate; one only ever consumed is a re-used feedstock (e.g.
+        # acetyl-CoA), one only ever produced is a byproduct. Knowing this
+        # lets us draw each arrow along the growing chain instead of from
+        # whichever reactant happened to be listed first (which orphaned
+        # real intermediates that appear as a step's 2nd substrate).
+        parsed_rxns, produced, consumed = [], set(), set()
         for rxn_str in p.reactions:
             parsed = parse_reaction_string(rxn_str)
-            reactants_real = [r for r in parsed["reactants"] if not is_helper(r)]
-            products_real  = [pp for pp in parsed["products"] if not is_helper(pp)]
-            reactants_help = [r for r in parsed["reactants"] if is_helper(r)]
-            products_help  = [pp for pp in parsed["products"] if is_helper(pp)]
-            if not reactants_real or not products_real:
+            r_real = [r for r in parsed["reactants"] if not is_helper(r)]
+            p_real = [pp for pp in parsed["products"] if not is_helper(pp)]
+            parsed_rxns.append((parsed, r_real, p_real))
+            produced.update(p_real)
+            consumed.update(r_real)
+
+        for parsed, r_real, p_real in parsed_rxns:
+            if not r_real or not p_real:
                 # Reaction where every reactant or every product is a
                 # cofactor: skip to avoid an orphan edge.
                 continue
-            primary_in  = reactants_real[0]
-            primary_out = products_real[0]
+            primary_in, primary_out = _chain_endpoints(
+                r_real, p_real, produced, consumed,
+                starter=starter, target=target_smiles,
+            )
             visible_mols.add(primary_in)
             visible_mols.add(primary_out)
+            # Everything else on the reaction is a co-substrate (goes into
+            # the "+" note) or byproduct (the "-" note), not its own node.
+            co_subs = list(parsed["reactants"]); co_subs.remove(primary_in)
+            byproducts = list(parsed["products"]); byproducts.remove(primary_out)
             key = (primary_in, primary_out, parsed["op_name"])
             rec = edge_records.get(key)
             if rec is None:
                 edge_records[key] = {
                     "pathways":   {idx},
-                    "co_subs":    tuple(reactants_real[1:] + reactants_help),
-                    "byproducts": tuple(products_real[1:]  + products_help),
+                    "co_subs":    tuple(co_subs),
+                    "byproducts": tuple(byproducts),
                 }
             else:
                 rec["pathways"].add(idx)
