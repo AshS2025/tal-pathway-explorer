@@ -45,69 +45,85 @@ function EnzymeTable({ rule }: { rule: string }) {
   return (
     <>
       {data.enzymes.length > 0 && (
-        <table className="enz-table">
-          <thead>
-            <tr>
-              <th>Enzyme</th>
-              <th>EC</th>
-              <th>MW (kDa)</th>
-              <th>Reaction</th>
-              <th>Gene</th>
-              <th>Organism</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.enzymes.map((e) => {
-              const uniprotUrl = `https://www.uniprot.org/uniprotkb/${e.accession}/entry`;
-              return (
-                <tr key={e.accession}>
-                  <td>
-                    {e.deleted ? (
-                      <>
-                        {e.accession}{" "}
-                        <span className="muted">(deleted in UniProt)</span>
-                      </>
-                    ) : (
-                      e.protein_name || e.accession
-                    )}
-                  </td>
-                  <td>
-                    {e.ec.length ? e.ec.join(", ") : <span className="muted">no EC</span>}
-                  </td>
-                  <td>
-                    {e.mass ? (e.mass / 1000).toFixed(1) : <span className="muted">—</span>}
-                  </td>
-                  <td>
-                    {e.reaction_count === 0 ? (
-                      <span className="muted">no reaction</span>
-                    ) : e.reaction_count <= 3 ? (
-                      e.reactions.map((r, i) => <div key={i}>{r}</div>)
-                    ) : (
-                      <a href={uniprotUrl} target="_blank" rel="noreferrer">
-                        {e.reaction_count} reactions — view in UniProt ↗
-                      </a>
-                    )}
-                  </td>
-                  <td>{e.gene || "—"}</td>
-                  <td>
-                    <i>{e.organism || "—"}</i>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <>
+          <p className="muted enz-note">
+            Any <b>one</b> of these enzymes can catalyze this step — they're
+            alternatives (mostly the same reaction across different organisms),
+            not all required. A blank EC or reaction means it isn't annotated
+            in UniProt, not that the enzyme lacks one.
+          </p>
+          <table className="enz-table">
+            <thead>
+              <tr>
+                <th>Enzyme</th>
+                <th>EC</th>
+                <th>MW (kDa)</th>
+                <th>Reaction</th>
+                <th>Gene</th>
+                <th>Organism</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.enzymes.map((e) => {
+                const uniprotUrl = `https://www.uniprot.org/uniprotkb/${e.accession}/entry`;
+                return (
+                  <tr key={e.accession}>
+                    <td>
+                      {e.deleted ? (
+                        <>
+                          {e.accession}{" "}
+                          <span className="muted">(deleted in UniProt)</span>
+                        </>
+                      ) : (
+                        e.protein_name || e.accession
+                      )}
+                    </td>
+                    <td>
+                      {e.ec.length ? (
+                        e.ec.join(", ")
+                      ) : (
+                        <span className="muted">not in UniProt</span>
+                      )}
+                    </td>
+                    <td>
+                      {e.mass ? (
+                        (e.mass / 1000).toFixed(1)
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td>
+                      {e.reaction_count === 0 ? (
+                        <span className="muted">not listed in UniProt</span>
+                      ) : e.reaction_count <= 3 ? (
+                        e.reactions.map((r, i) => <div key={i}>{r}</div>)
+                      ) : (
+                        <a href={uniprotUrl} target="_blank" rel="noreferrer">
+                          {e.reaction_count} reactions — view in UniProt ↗
+                        </a>
+                      )}
+                    </td>
+                    <td>{e.gene || "—"}</td>
+                    <td>
+                      <i>{e.organism || "—"}</i>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </>
       )}
       {data.total > data.shown && (
         <p className="muted">
-          Showing the first {data.shown} of {data.total} annotated enzymes.{" "}
+          Showing the first {data.shown} of {data.total} possible enzymes.{" "}
           <a href={data.uniprot_url} target="_blank" rel="noreferrer">
             View all in UniProt ↗
           </a>
         </p>
       )}
       {data.shown === 0 && (
-        <p className="muted">No enzymes resolved in UniProt for this step.</p>
+        <p className="muted">No enzymes could be resolved in UniProt for this step.</p>
       )}
     </>
   );
@@ -145,7 +161,10 @@ function StepItem({
         {isChem ? null : isBioNoEnzyme ? (
           <span className="enz-none"> · no enzyme (possibly spontaneous)</span>
         ) : (
-          <span className="enz"> · {enz} enzyme{enz === 1 ? "" : "s"}</span>
+          <span className="enz">
+            {" · "}
+            {enz} enzyme{enz === 1 ? "" : "s"} possible for this step
+          </span>
         )}
       </summary>
       <div className="step-body">
@@ -238,11 +257,11 @@ export default function PathwaysView({ pathways, ranked }: Props) {
 
       <h3>Details</h3>
       {pathways.map((p, idx) => (
-        <details key={p.rank} open={idx === 0}>
+        <details className="pathway" key={p.rank} open={idx === 0}>
           <summary>
             {ranked
               ? `Rank ${p.rank} — final ${fmt(p.blended_score)} — ${p.reaction_smiles.length} steps`
-              : `#${p.rank} — ${p.reaction_smiles.length} steps`}
+              : `Pathway #${p.rank} — ${p.reaction_smiles.length} steps`}
           </summary>
           <Steps p={p} />
         </details>
