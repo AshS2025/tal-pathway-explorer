@@ -10,7 +10,7 @@ import pytest
 from pathway_scoring import (
     _floored, _weighted_geomean,
     DoranetScoreCriterion, ProcedureDiversityCriterion,
-    IntermediateStabilityCriterion, FeasibilityCriterion,
+    IntermediateStabilityCriterion, FeasibilityCriterion, EnzymeLoadCriterion,
     apply_lemnisca_blend, RankedPathway,
 )
 
@@ -138,9 +138,20 @@ def test_feasibility_unscoreable_bio_step_not_penalized():
     assert FeasibilityCriterion(_FakeDora({"A>>B": None})).score([p])[0] == 1.0
 
 
+# -------------------------------------------- EnzymeLoadCriterion
+def test_enzyme_load_uses_minimum_enzymes():
+    crit = EnzymeLoadCriterion()
+    chem = mk(1, ["A>>B"], ["Dehydration of Alcohol"])   # 0 enzymes -> 1.0
+    one = mk(1, ["A>>B"], ["rule0087"])                  # 1 enzyme  -> 0.85
+    s = crit.score([chem, one])
+    assert s[0] == pytest.approx(1.0)
+    assert s[1] == pytest.approx(0.85)
+
+
 # ================================================= apply_lemnisca_blend =====
-# Two benign pathways under DEFAULT weights (layer doranet=2/lemnisca=1;
-# lemnisca stability=1/diversity=1). All intermediates benign -> stability 1.0.
+# Two benign CHEM pathways under DEFAULT weights (layer doranet=2/lemnisca=1;
+# lemnisca stability=1/diversity=1/enzyme_load=1). Benign intermediates ->
+# stability 1.0; chem-only -> enzyme_load 1.0.
 def test_blend_default_weights_numbers():
     p1 = mk(30, ["CCO>>CCO.O", "CCO>>CCO"], ["opA", "opA"])   # diversity 1.0
     p2 = mk(10, ["CCO>>CCO.O", "CCO>>CCO"], ["opA", "opB"])   # diversity 0.0
@@ -151,16 +162,19 @@ def test_blend_default_weights_numbers():
     assert p2.lemnisca_components["doranet"] == pytest.approx(0.0)
     assert p1.lemnisca_components["stability"] == 1.0
     assert p2.lemnisca_components["diversity"] == pytest.approx(0.0)
+    # chem-only routes carry no enzyme burden
+    assert p1.lemnisca_components["enzyme_load"] == pytest.approx(1.0)
+    assert p2.lemnisca_components["enzyme_load"] == pytest.approx(1.0)
 
-    # p1: lemnisca = geomean(floored(1,0)=1, floored(1,0.5)=1) = 1.0
+    # p1: lemnisca = geomean(floored(1,0)=1, floored(1,0.5)=1, 1) = 1.0
     #     blended  = geomean(floored(1,0.5)=1 ^2, 1 ^1) = 1.0
     assert p1.lemnisca_score == pytest.approx(1.0)
     assert p1.blended_score == pytest.approx(1.0)
 
-    # p2: lemnisca = geomean(1, floored(0,0.5)=0.5) = sqrt(0.5) = 0.70710678
-    #     blended  = geomean(floored(0,0.5)=0.5 ^2, 0.70710678 ^1) = 0.561231
-    assert p2.lemnisca_score == pytest.approx(math.sqrt(0.5))
-    assert p2.blended_score == pytest.approx(0.5612, abs=1e-3)
+    # p2: lemnisca = geomean(1, floored(0,0.5)=0.5, 1) = 0.5 ** (1/3)
+    #     blended  = geomean(floored(0,0.5)=0.5 ^2, lemnisca ^1) = 0.5833
+    assert p2.lemnisca_score == pytest.approx(0.5 ** (1 / 3))
+    assert p2.blended_score == pytest.approx(0.583, abs=1e-3)
 
     # sorted best-first, ranks reassigned
     assert out[0] is p1 and out[1] is p2

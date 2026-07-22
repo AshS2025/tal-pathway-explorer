@@ -33,6 +33,38 @@ def test_annotate_pathways_adds_parallel_list():
     assert pathways[0]["reaction_enzymes"] == [7, None, 0]
 
 
+# ---- minimum-enzyme set cover (the "shared enzyme covers two steps" idea) ----
+def test_min_enzymes_shared_enzyme_reduces_count():
+    # step1 needs A, step2 needs B, step3 can use A or C -> pick A (covers
+    # steps 1 & 3) + B = 2 enzymes total, not 3.
+    assert enzyme_info.min_enzymes_from_sets([{"A"}, {"B"}, {"A", "C"}]) == 2
+
+
+def test_min_enzymes_no_sharing_is_one_per_step():
+    assert enzyme_info.min_enzymes_from_sets([{"A"}, {"B"}, {"C"}]) == 3
+
+
+def test_min_enzymes_one_enzyme_covers_all():
+    assert enzyme_info.min_enzymes_from_sets([{"A", "B"}, {"A"}, {"A", "C"}]) == 1
+
+
+def test_min_enzymes_empty_sets_excluded():
+    assert enzyme_info.min_enzymes_from_sets([set(), set()]) == 0
+    assert enzyme_info.min_enzymes_from_sets([{"A"}, set()]) == 1
+
+
+def test_minimum_enzyme_count_from_rule_names():
+    assert enzyme_info.minimum_enzyme_count(["Dehydration of Alcohol"]) == 0  # chem
+    assert enzyme_info.minimum_enzyme_count(["rule0891"]) == 0                # no known enzyme
+    assert enzyme_info.minimum_enzyme_count(["rule0087"]) == 1                # one bio step
+
+
+def test_annotate_adds_min_enzymes():
+    pathways = [{"reaction_names": ["rule0087", "Dehydration of Alcohol"]}]
+    enzyme_info.annotate_pathways(pathways)
+    assert pathways[0]["min_enzymes"] == 1
+
+
 def test_annotate_handles_missing_names():
     pathways = [{}]
     enzyme_info.annotate_pathways(pathways)

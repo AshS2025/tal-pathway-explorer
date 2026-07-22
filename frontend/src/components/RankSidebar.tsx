@@ -37,6 +37,7 @@ export default function RankSidebar({ onRank, disabled, busy }: Props) {
   // tier 1 — lemnisca components
   const [wStability, setWStability] = useState(1);
   const [wDiversity, setWDiversity] = useState(1);
+  const [wEnzymeLoad, setWEnzymeLoad] = useState(1);
   // tier 0 — DORAnet internals
   const [wSteps, setWSteps] = useState(4);
   const [wThermo, setWThermo] = useState(2);
@@ -46,7 +47,11 @@ export default function RankSidebar({ onRank, disabled, busy }: Props) {
   function submit() {
     const req: RankRequest = {
       layer_weights: { doranet: wDoranet, lemnisca: wLemnisca },
-      lemnisca_weights: { stability: wStability, diversity: wDiversity },
+      lemnisca_weights: {
+        stability: wStability,
+        diversity: wDiversity,
+        enzyme_load: wEnzymeLoad,
+      },
       weights: {
         number_of_steps: wSteps,
         reaction_thermo: wThermo,
@@ -71,6 +76,7 @@ export default function RankSidebar({ onRank, disabled, busy }: Props) {
           <h4>Lemnisca components</h4>
           <Weight label="Stability" value={wStability} onChange={setWStability} />
           <Weight label="Diversity" value={wDiversity} onChange={setWDiversity} />
+          <Weight label="Enzyme load" value={wEnzymeLoad} onChange={setWEnzymeLoad} />
 
           <details className="advanced">
             <summary>DORAnet internal weights</summary>

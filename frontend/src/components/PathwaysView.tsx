@@ -9,6 +9,12 @@ const comp = (p: Pathway, key: string) => {
   return v === undefined ? "—" : v.toFixed(2);
 };
 
+// Minimum distinct enzymes to build the route (shared multifunctional
+// enzymes counted once). Falls back to the bio-step count for older data.
+const enzymeCount = (p: Pathway) =>
+  p.min_enzymes ??
+  (p.reaction_enzymes ?? []).filter((e) => e !== null).length;
+
 const trunc = (s: string, n = 42) => (s.length <= n ? s : s.slice(0, n - 3) + "...");
 
 // Enzyme metadata table for one bio rule. Fetches from UniProt (via our
@@ -192,7 +198,9 @@ export default function PathwaysView({ pathways, ranked }: Props) {
                 <th>Lemnisca</th>
                 <th>Stability</th>
                 <th>Diversity</th>
+                <th>Enz. load</th>
                 <th>Steps</th>
+                <th>Min. enzymes</th>
               </tr>
             </thead>
             <tbody>
@@ -204,7 +212,9 @@ export default function PathwaysView({ pathways, ranked }: Props) {
                   <td>{fmt(p.lemnisca_score)}</td>
                   <td>{comp(p, "stability")}</td>
                   <td>{comp(p, "diversity")}</td>
+                  <td>{comp(p, "enzyme_load")}</td>
                   <td>{p.reaction_smiles.length}</td>
+                  <td>{enzymeCount(p)}</td>
                 </tr>
               ))}
             </tbody>

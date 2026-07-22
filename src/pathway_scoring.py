@@ -548,6 +548,36 @@ class FeasibilityCriterion(PathwayCriterion):
         return out
 
 
+class EnzymeLoadCriterion(PathwayCriterion):
+    """Metabolic-engineering burden: the MINIMUM number of distinct enzymes
+    you'd need to express to build this route in a host.
+
+    The multiple UniProt hits per rule are ALTERNATIVE catalysts for that
+    one step (same reaction, different organisms), so a step needs just one
+    of them — not all. Better still: a multifunctional enzyme that appears
+    in two different steps' candidate lists can catalyze BOTH, so the true
+    minimum is a set-cover over the steps, which can be fewer than the
+    number of bio steps. Chem steps and no-known-enzyme steps don't count.
+    (This is an optimistic lower bound — the operators are somewhat
+    promiscuous, so a shared enzyme *could* cover both steps, not a
+    guarantee that it does.)
+
+    Absolute (not batch-normalized): raw = DECAY ** min_enzymes, so each
+    additional required enzyme discounts multiplicatively but never zeroes
+    the score. Soft (floor 0.5): a preference, not a dealbreaker.
+    """
+
+    name = "enzyme_load"
+    floor = 0.5
+    _DECAY = 0.85
+
+    def score(self, pathways: list) -> list:
+        # lazy import avoids a module cycle (enzyme_info imports is_bio_op)
+        from enzyme_info import minimum_enzyme_count
+        return [self._DECAY ** minimum_enzyme_count(p.reaction_names)
+                for p in pathways]
+
+
 # Tier-2 (layer) default weights: DORAnet's chemistry score vs. the
 # Lemnisca process-viability score. DORAnet counts double by default.
 LAYER_DEFAULT_WEIGHTS = {
@@ -558,8 +588,9 @@ LAYER_DEFAULT_WEIGHTS = {
 # (DORA-XGB feasibility is applied as a generation-phase PRUNE, not a
 # ranking component — see run_pipeline's feasibility_prune_threshold.)
 LEMNISCA_DEFAULT_WEIGHTS = {
-    "stability": 1.0,
-    "diversity": 1.0,
+    "stability":   1.0,
+    "diversity":   1.0,
+    "enzyme_load": 1.0,
 }
 
 
@@ -619,6 +650,7 @@ def apply_lemnisca_blend(
     lem_criteria = [
         IntermediateStabilityCriterion(excluded_smiles),
         ProcedureDiversityCriterion(),
+        EnzymeLoadCriterion(),
     ]
     doranet_grades = doranet_c.score(ranked_pathways)
     lem_grades = {c.name: c.score(ranked_pathways) for c in lem_criteria}

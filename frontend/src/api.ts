@@ -46,6 +46,9 @@ export interface Pathway {
   // per-step enzyme count for BIO steps (null for chem steps; 0 = no known
   // enzyme, possibly spontaneous). Parallel to reaction_names.
   reaction_enzymes?: (number | null)[];
+  // minimum distinct enzymes to build the whole route (shared
+  // multifunctional enzymes counted once)
+  min_enzymes?: number;
   equilibrator_max_dg: number | null;
   equilibrator_avg_dg: number | null;
   equilibrator_coverage: number;
