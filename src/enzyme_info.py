@@ -54,49 +54,20 @@ def enzyme_count_for_step(op_name: str) -> Optional[int]:
     return len(enzyme_ids_for_rule(op_name))
 
 
-def min_enzymes_from_sets(candidate_sets: list) -> int:
-    """Minimum number of enzymes that together catalyze every step, given
-    each step's SET of candidate enzymes.
-
-    A single multifunctional enzyme that appears in two different steps'
-    candidate lists covers both steps at once — so this is an exact minimum
-    set-cover over the steps (not a raw step count). Steps with an EMPTY
-    candidate set are excluded (no known enzyme; surfaced separately as
-    'possibly spontaneous'), so they don't inflate the count.
-
-    Exact via subset DP — pathways have few steps, so 2^n is tiny.
-    """
-    steps = [s for s in candidate_sets if s]
-    n = len(steps)
-    if n == 0:
-        return 0
-    # each enzyme -> bitmask of the steps it can catalyze
-    cover: dict = {}
-    for i, s in enumerate(steps):
-        for e in s:
-            cover[e] = cover.get(e, 0) | (1 << i)
-    masks = set(cover.values())
-    full = (1 << n) - 1
-    INF = n + 1
-    dp = [INF] * (1 << n)
-    dp[0] = 0
-    for subset in range(1 << n):
-        if dp[subset] == INF:
-            continue
-        base = dp[subset]
-        for m in masks:
-            nxt = subset | m
-            if dp[nxt] > base + 1:
-                dp[nxt] = base + 1
-    return dp[full]
-
-
 def minimum_enzyme_count(reaction_names: list) -> int:
-    """Minimum distinct enzymes needed to catalyze a pathway's bio steps,
-    accounting for one enzyme covering multiple steps. Chem steps and
-    no-known-enzyme bio steps don't contribute."""
-    sets = [set(enzyme_ids_for_rule(n)) for n in reaction_names if is_bio_op(n)]
-    return min_enzymes_from_sets(sets)
+    """Minimum distinct enzymes needed to build a pathway's bio steps: one
+    per DISTINCT bio rule that has a known enzyme.
+
+    Repeating the SAME rule (the same reaction) reuses the same enzyme, so
+    it collapses to one. We deliberately do NOT collapse *different* rules
+    that merely share a candidate enzyme — whether a promiscuous enzyme
+    truly catalyzes both reactions needs biological judgment we don't have,
+    so we stay conservative. Chem steps and no-known-enzyme bio steps (e.g.
+    the possibly-spontaneous rule0891) don't count.
+    """
+    distinct = {n for n in reaction_names
+                if is_bio_op(n) and enzyme_ids_for_rule(n)}
+    return len(distinct)
 
 
 def annotate_pathways(pathways: list) -> None:

@@ -549,18 +549,14 @@ class FeasibilityCriterion(PathwayCriterion):
 
 
 class EnzymeLoadCriterion(PathwayCriterion):
-    """Metabolic-engineering burden: the MINIMUM number of distinct enzymes
-    you'd need to express to build this route in a host.
+    """Metabolic-engineering burden: the number of distinct enzymes you'd
+    need to express to build this route in a host.
 
     The multiple UniProt hits per rule are ALTERNATIVE catalysts for that
     one step (same reaction, different organisms), so a step needs just one
-    of them — not all. Better still: a multifunctional enzyme that appears
-    in two different steps' candidate lists can catalyze BOTH, so the true
-    minimum is a set-cover over the steps, which can be fewer than the
-    number of bio steps. Chem steps and no-known-enzyme steps don't count.
-    (This is an optimistic lower bound — the operators are somewhat
-    promiscuous, so a shared enzyme *could* cover both steps, not a
-    guarantee that it does.)
+    of them — not all. Repeating the same rule reuses the same enzyme (it
+    collapses to one); different rules are counted separately. Chem steps
+    and no-known-enzyme steps don't count. See minimum_enzyme_count().
 
     Absolute (not batch-normalized): raw = DECAY ** min_enzymes, so each
     additional required enzyme discounts multiplicatively but never zeroes
