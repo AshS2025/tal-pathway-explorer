@@ -31,10 +31,12 @@ import re
 import threading
 import urllib.parse
 import urllib.request
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 _BASE = "https://rest.uniprot.org/uniprotkb/search"
-_FIELDS = "accession,protein_name,ec,gene_names,organism_name,cc_catalytic_activity"
+_WEB = "https://www.uniprot.org/uniprotkb"
+_FIELDS = ("accession,protein_name,ec,gene_names,organism_name,mass,"
+           "cc_catalytic_activity")
 # We only show reactions inline when an enzyme has few of them (a
 # multifunctional enzyme with many reactions is ambiguous — we can't tell
 # which matches the rule — so the UI links out to UniProt instead). We still
@@ -97,6 +99,9 @@ def parse_tsv(tsv: str) -> List[dict]:
         raw_name = get("Protein names").strip()
         deleted = raw_name.lower() == "deleted"
 
+        mass_raw = get("Mass").replace(",", "").strip()   # Daltons
+        mass = int(mass_raw) if mass_raw.isdigit() else None
+
         ec = [e.strip() for e in get("EC number").split(";") if e.strip()]
         reactions = [r.strip() for r in _REACTION_RE.findall(get("Catalytic activity"))]
         # de-dupe reactions while preserving order
@@ -110,6 +115,7 @@ def parse_tsv(tsv: str) -> List[dict]:
             "protein_name": "" if deleted else _primary_name(raw_name),
             "deleted": deleted,
             "ec": ec,
+            "mass": mass,                                      # Daltons (None if unknown)
             "gene": get("Gene Names").split(" ")[0].strip(),   # first gene symbol
             "organism": _scientific_organism(get("Organism")),
             # inline reactions only when there are few; `reaction_count` is
@@ -131,12 +137,26 @@ def _fetch_tsv(accessions: List[str]) -> str:
         return r.read().decode("utf-8")
 
 
-def resolve(accessions: List[str]) -> List[dict]:
+def uniprot_search_url(accessions: List[str], cap: int = 100) -> str:
+    """A uniprot.org search URL covering these accessions — used for the
+    'view all in UniProt' link when we only show the first few inline."""
+    valid = [a for a in dict.fromkeys(accessions) if _is_accession(a)][:cap]
+    if not valid:
+        return _WEB
+    query = " OR ".join(f"(accession:{a})" for a in valid)
+    return _WEB + "?" + urllib.parse.urlencode({"query": query})
+
+
+def resolve(accessions: List[str], limit: Optional[int] = None) -> List[dict]:
     """Resolve accessions to enzyme records, in the given order. Cached and
-    batched into few HTTP calls. Unresolvable ids (non-UniProt, or a failed
-    fetch) are omitted — this never raises on a network error."""
+    batched into few HTTP calls. Non-accession ids (gene names etc.) are
+    dropped first — they'd 400 the batch — then the list is capped to
+    `limit`. Unresolvable ids (or a failed fetch) are omitted; this never
+    raises on a network error."""
     # de-dupe, keep order, and drop non-accession ids (they'd 400 the batch)
     want = list(dict.fromkeys(a for a in accessions if _is_accession(a)))
+    if limit is not None:
+        want = want[:limit]
     with _lock:
         missing = [a for a in want if a not in _cache]
 

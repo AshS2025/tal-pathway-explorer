@@ -43,6 +43,27 @@ def test_gene_and_organism():
     assert recs["Q64428"]["organism"] == "Rattus norvegicus"
 
 
+def test_mass_parsed_as_daltons():
+    recs = {r["accession"]: r for r in uniprot_client.parse_tsv(_fixture_tsv())}
+    assert recs["P42765"]["mass"] == 41924       # Da (~41.9 kDa)
+    assert recs["Q64428"]["mass"] == 82665
+    assert all(isinstance(r["mass"], int) for r in recs.values())
+
+
+def test_uniprot_search_url_covers_valid_accessions():
+    url = uniprot_client.uniprot_search_url(["P42765", "NCED52", "Q64428"])
+    assert url.startswith("https://www.uniprot.org/uniprotkb?")
+    assert "P42765" in url and "Q64428" in url
+    assert "NCED52" not in url                   # gene name filtered out
+
+
+def test_resolve_limit_caps_results(monkeypatch):
+    monkeypatch.setattr(uniprot_client, "_fetch_tsv", lambda accs: _fixture_tsv())
+    uniprot_client.clear_cache()
+    recs = uniprot_client.resolve(["P42765", "Q64428", "D2I940"], limit=2)
+    assert len(recs) <= 2
+
+
 def test_blank_ec_column_is_ok():
     # D2I940 has an empty EC column but an EC lives inside its reaction text;
     # the parser must not choke on the blank column.

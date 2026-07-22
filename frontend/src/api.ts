@@ -63,6 +63,7 @@ export interface Enzyme {
   protein_name: string;
   deleted: boolean; // UniProt entry was removed/demerged
   ec: string[];
+  mass: number | null; // molecular weight in Daltons (null if unknown)
   gene: string;
   organism: string;
   reactions: string[]; // populated only when reaction_count is small (<= 3)
@@ -72,14 +73,14 @@ export interface Enzyme {
 export interface RuleEnzymes {
   rule: string;
   total: number; // enzymes annotated on the rule
-  shown: number; // of those, how many resolved in UniProt
-  truncated: boolean;
+  shown: number; // how many resolved + displayed
   enzymes: Enzyme[];
+  uniprot_url: string; // link to the full set on uniprot.org
 }
 
 export async function fetchRuleEnzymes(
   rule: string,
-  limit = 25,
+  limit = 5,
 ): Promise<RuleEnzymes> {
   return jsonOrThrow(await fetch(`${BASE}/rules/${rule}/enzymes?limit=${limit}`));
 }

@@ -44,18 +44,13 @@ function EnzymeTable({ rule }: { rule: string }) {
 
   return (
     <>
-      {data.shown < data.total && (
-        <p className="muted">
-          Showing {data.shown} of {data.total} annotated enzymes
-          {data.shown === 0 ? " (none resolved in UniProt)" : ""}.
-        </p>
-      )}
       {data.enzymes.length > 0 && (
         <table className="enz-table">
           <thead>
             <tr>
               <th>Enzyme</th>
               <th>EC</th>
+              <th>MW (kDa)</th>
               <th>Reaction</th>
               <th>Gene</th>
               <th>Organism</th>
@@ -80,6 +75,9 @@ function EnzymeTable({ rule }: { rule: string }) {
                     {e.ec.length ? e.ec.join(", ") : <span className="muted">no EC</span>}
                   </td>
                   <td>
+                    {e.mass ? (e.mass / 1000).toFixed(1) : <span className="muted">—</span>}
+                  </td>
+                  <td>
                     {e.reaction_count === 0 ? (
                       <span className="muted">no reaction</span>
                     ) : e.reaction_count <= 3 ? (
@@ -99,6 +97,17 @@ function EnzymeTable({ rule }: { rule: string }) {
             })}
           </tbody>
         </table>
+      )}
+      {data.total > data.shown && (
+        <p className="muted">
+          Showing the first {data.shown} of {data.total} annotated enzymes.{" "}
+          <a href={data.uniprot_url} target="_blank" rel="noreferrer">
+            View all in UniProt ↗
+          </a>
+        </p>
+      )}
+      {data.shown === 0 && (
+        <p className="muted">No enzymes resolved in UniProt for this step.</p>
       )}
     </>
   );

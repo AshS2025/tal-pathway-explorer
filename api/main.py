@@ -257,7 +257,7 @@ def _bio_op_enzyme_labels(pathways) -> dict:
         ids = enzyme_ids_for_rule(rule)
         if not ids:
             continue
-        recs = uniprot_client.resolve(ids[:5])   # one name is enough for a label
+        recs = uniprot_client.resolve(ids, limit=5)   # one name is enough for a label
         name = next((r["protein_name"] for r in recs if r.get("protein_name")), None)
         if name:
             labels[rule] = name
@@ -265,20 +265,20 @@ def _bio_op_enzyme_labels(pathways) -> dict:
 
 
 @app.get("/rules/{rule_name}/enzymes")
-def rule_enzymes(rule_name: str, limit: int = 25):
-    """Resolve the enzymes for one bio rule to human-readable metadata
-    (protein name, EC, reaction, gene, organism) via UniProt. On-demand and
-    capped, because a rule can list thousands of accessions — the frontend
-    calls this when the user expands a bio step."""
+def rule_enzymes(rule_name: str, limit: int = 5):
+    """Resolve the FIRST few enzymes for one bio rule to human-readable
+    metadata (protein name, EC, reaction, MW, gene, organism) via UniProt,
+    and return a link to the full set. On-demand (the frontend calls it when
+    a bio step is expanded) and capped, since a rule can list thousands."""
     ids = enzyme_ids_for_rule(rule_name)
-    limit = max(0, min(limit, 200))
-    enzymes = uniprot_client.resolve(ids[:limit])
+    limit = max(0, min(limit, 25))
+    enzymes = uniprot_client.resolve(ids, limit=limit)
     return {
         "rule": rule_name,
         "total": len(ids),                 # enzymes annotated on the rule
-        "shown": len(enzymes),             # of those, how many resolved in UniProt
-        "truncated": len(ids) > limit,
+        "shown": len(enzymes),             # how many we resolved + display
         "enzymes": enzymes,
+        "uniprot_url": uniprot_client.uniprot_search_url(ids),  # view all
     }
 
 
