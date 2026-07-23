@@ -1,24 +1,68 @@
-.app {
+/* ---- shell + branded top bar ---- */
+.shell {
   display: flex;
+  flex-direction: column;
   min-height: 100vh;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  height: 60px;
+  padding: 0 24px;
+  background: var(--topbar);
+  color: #fff;
+  border-bottom: 3px solid var(--accent);
+  box-shadow: var(--shadow);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand-mark {
+  font-size: 26px;
+  line-height: 1;
+}
+.brand-title {
+  font-weight: 650;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+}
+.brand-sub {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 1px;
+}
+
+/* ---- body: sidebar + main ---- */
+.body {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
 }
 
 /* ---- sidebar (ranking weights) ---- */
 .sidebar {
+  position: sticky;
+  top: 60px;
   width: 280px;
   flex-shrink: 0;
+  align-self: stretch;
   border-right: 1px solid var(--border);
-  background: var(--panel);
-  padding: 16px;
+  background: var(--surface);
+  padding: 20px;
 }
 .sidebar h2 {
   margin-top: 0;
 }
 .sidebar h4 {
-  margin: 16px 0 6px;
-  font-size: 12px;
+  margin: 18px 0 6px;
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.6px;
   color: var(--muted);
 }
 .weight {
@@ -26,46 +70,60 @@
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  margin: 4px 0;
+  margin: 6px 0;
   font-size: 13px;
 }
 .weight input {
-  width: 60px;
-  padding: 4px 6px;
+  width: 62px;
+  padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   font: inherit;
 }
 .sidebar .primary {
   width: 100%;
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
 /* ---- main area ---- */
 .main {
   flex: 1;
-  padding: 20px 28px;
-  max-width: 1100px;
+  min-width: 0;
+  padding: 24px 32px;
+  max-width: 1160px;
 }
 .tabs {
   display: flex;
   gap: 4px;
-  border-bottom: 1px solid var(--border);
   margin-bottom: 16px;
 }
 .tabs button {
   border: none;
   background: none;
-  padding: 10px 16px;
+  padding: 8px 16px;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--muted);
-  border-bottom: 2px solid transparent;
+  border-radius: 8px;
+}
+.tabs button:hover {
+  background: var(--panel);
+  color: var(--text);
 }
 .tabs button.active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  background: var(--accent-weak);
   font-weight: 600;
+}
+
+/* content sits on a white card floating over the tinted background */
+.content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
 }
 
 /* ---- inputs form ---- */
@@ -87,10 +145,19 @@
 .form textarea {
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   font: inherit;
   color: var(--text);
   background: #fff;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.form input:focus,
+.form select:focus,
+.form textarea:focus,
+.weight input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-weak);
 }
 .row {
   display: flex;
@@ -106,12 +173,14 @@
 }
 .advanced {
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 12px;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--panel);
 }
 .advanced summary {
   cursor: pointer;
   font-size: 13px;
+  font-weight: 500;
   color: var(--muted);
 }
 
@@ -120,10 +189,16 @@ button.primary {
   color: #fff;
   border: none;
   padding: 10px 18px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
   align-self: flex-start;
+  box-shadow: var(--shadow);
+  transition: background 0.12s;
+}
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
 }
 button.primary:disabled {
   opacity: 0.5;
@@ -148,12 +223,15 @@ table.grid {
   width: 100%;
   margin: 8px 0 16px;
   font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
 }
 table.grid th,
 table.grid td {
-  border: 1px solid var(--border);
-  padding: 6px 10px;
+  padding: 8px 12px;
   text-align: right;
+  border-bottom: 1px solid var(--border);
 }
 table.grid th:first-child,
 table.grid td:first-child,
@@ -161,8 +239,21 @@ table.grid th:last-child,
 table.grid td:last-child {
   text-align: center;
 }
+table.grid tbody tr:last-child td {
+  border-bottom: none;
+}
+table.grid tbody tr:nth-child(even) {
+  background: var(--panel);
+}
 table.grid thead {
   background: var(--panel);
+}
+table.grid thead th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
 }
 details {
   border: 1px solid var(--border);

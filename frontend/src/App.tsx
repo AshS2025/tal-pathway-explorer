@@ -73,16 +73,26 @@ export default function App() {
   const isRanked = !!run?.ranked_pathways;
 
   return (
-    <div className="app">
-      <RankSidebar
-        onRank={handleRank}
-        disabled={!run || status === "generating"}
-        busy={status === "ranking"}
-      />
+    <div className="shell">
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark">⚗️</span>
+          <div className="brand-text">
+            <div className="brand-title">TAL Pathway Explorer</div>
+            <div className="brand-sub">Lemnisca · pathway enumeration &amp; ranking</div>
+          </div>
+        </div>
+      </header>
 
-      <main className="main">
-        <h1>⚗️ TAL Pathway Explorer</h1>
-        {err && <div className="error">{err}</div>}
+      <div className="body">
+        <RankSidebar
+          onRank={handleRank}
+          disabled={!run || status === "generating"}
+          busy={status === "ranking"}
+        />
+
+        <main className="main">
+          {err && <div className="error">{err}</div>}
 
         <nav className="tabs">
           <button className={tab === "inputs" ? "active" : ""} onClick={() => setTab("inputs")}>
@@ -160,7 +170,8 @@ export default function App() {
             </div>
           )}
         </section>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
