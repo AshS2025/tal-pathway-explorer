@@ -129,15 +129,19 @@ function EnzymeTable({ rule }: { rule: string }) {
   );
 }
 
-// One step in a pathway — itself a dropdown. Collapsed shows the operator +
-// enzyme badge; expanded shows the reaction and (for bio steps) the UniProt
-// enzyme table, fetched lazily on first open.
+// One step in a pathway. Always shows the operator + reaction. ENZYME
+// content is BIO-ONLY: a bio step with enzymes gets an expandable enzyme
+// dropdown (lazy-loaded); a bio step with no known enzyme gets a short
+// "possibly spontaneous" note. CHEM steps have no enzymes, so they get
+// no enzyme UI at all.
 function StepItem({
+  num,
   name,
   smi,
   dh,
   enz,
 }: {
+  num: number;
   name: string;
   smi: string;
   dh: number | null;
@@ -145,43 +149,38 @@ function StepItem({
 }) {
   const [open, setOpen] = useState(false);
   const [lhs, rhs] = smi.split(">>");
-  const isChem = enz === null || enz === undefined;
-  const isBioNoEnzyme = enz === 0;
+  const isChem = enz === null || enz === undefined; // chem step: no enzyme concept
+  const hasEnzymes = typeof enz === "number" && enz > 0;
+  const bioNoEnzyme = enz === 0;
 
   return (
-    <details
-      className="step"
-      onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
-    >
-      <summary>
-        <span className="op">{name}</span>
+    <div className="step">
+      <div className="step-head">
+        <span className="step-num">Step {num}:</span> <span className="op">{name}</span>
         {dh !== null && dh !== undefined ? (
           <span className="dh"> ΔH={dh.toFixed(1)}</span>
         ) : null}
-        {isChem ? null : isBioNoEnzyme ? (
+        {bioNoEnzyme && (
           <span className="enz-none"> · no enzyme (possibly spontaneous)</span>
-        ) : (
-          <span className="enz">
-            {" · "}
-            {enz} enzyme{enz === 1 ? "" : "s"} possible for this step
-          </span>
         )}
-      </summary>
-      <div className="step-body">
-        <div className="rxn">
-          {(lhs ?? "").split(".").map(trunc).join(" + ")} <b>→</b>{" "}
-          {(rhs ?? "").split(".").map(trunc).join(" + ")}
-        </div>
-        {open &&
-          (isChem ? (
-            <p className="muted">Chemical operator — no enzyme data.</p>
-          ) : isBioNoEnzyme ? (
-            <p className="enz-none">No known enzyme; this step may be spontaneous.</p>
-          ) : (
-            <EnzymeTable rule={name} />
-          ))}
       </div>
-    </details>
+      <div className="rxn">
+        {(lhs ?? "").split(".").map(trunc).join(" + ")} <b>→</b>{" "}
+        {(rhs ?? "").split(".").map(trunc).join(" + ")}
+      </div>
+      {/* enzyme dropdown is BIO-only; never shown for chem steps */}
+      {!isChem && hasEnzymes && (
+        <details
+          className="enz-dd"
+          onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}
+        >
+          <summary className="enz">
+            {enz} enzyme{enz === 1 ? "" : "s"} possible for this step
+          </summary>
+          {open && <EnzymeTable rule={name} />}
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -190,6 +189,7 @@ function Steps({ p }: { p: Pathway }) {
     <div className="steps">
       {p.reaction_smiles.map((smi, i) => (
         <StepItem
+          num={i + 1}
           key={i}
           name={p.reaction_names[i]}
           smi={smi}

@@ -193,35 +193,32 @@ details.pathway[open] > summary {
   border-bottom: 1px solid var(--border);
 }
 
-/* ---- step dropdowns (INNER): light, indented, left-accent rows ---- */
+/* ---- steps (INNER): light, indented, left-accent rows ---- */
 .steps {
   margin: 0;
   padding: 8px 16px 14px;
-  counter-reset: step;
 }
 .steps .step {
-  border: none;
   border-left: 3px solid var(--accent-weak, #cdd9ec);
-  border-radius: 0;
-  padding: 2px 0 2px 12px;
-  margin: 10px 0;
-  background: none;
+  padding: 2px 0 6px 12px;
+  margin: 12px 0;
 }
-.steps .step > summary {
-  cursor: pointer;
-  font-weight: 500;
+.steps .step-head {
   font-size: 14px;
-  counter-increment: step;
 }
-.steps .step > summary::before {
-  content: "Step " counter(step) ": ";
+.steps .step-num {
   color: var(--muted);
   font-weight: 600;
 }
-.steps .step-body {
-  margin-top: 8px;
-  padding-left: 4px;
+/* enzyme dropdown — BIO steps only */
+.enz-dd {
+  margin-top: 6px;
   overflow-x: auto;
+}
+.enz-dd > summary {
+  cursor: pointer;
+  color: #2e7d32;      /* green: this step has known enzymes */
+  font-size: 13px;
 }
 .enz-note {
   font-size: 12px;
